@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<link rel="manifest" href="manifest.webmanifest?v=2">
+<link rel="icon" href="favicon.ico?v=2" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=2">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png?v=2">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=2">
+<meta name="theme-color" content="#2e2d31">
+<meta name="apple-mobile-web-app-title" content="Primate Chaos">
+<title>Primate Chaos — VR jungle tag</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#0d2a1a;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#fff}
+canvas{display:block}
+#landing{position:fixed;inset:0;display:flex;align-items:flex-start;justify-content:center;background:radial-gradient(ellipse at 50% 30%,rgba(40,120,60,.82),rgba(5,25,15,.94));z-index:5;overflow:auto}
+#landing.hidden{display:none}
+.card{max-width:560px;width:92%;text-align:center;padding:18px 10px;margin:auto}
+h1{font-size:clamp(38px,9vw,72px);margin:0 0 4px;letter-spacing:2px;color:#ffd23f;text-shadow:0 4px 0 #a0521d,0 8px 18px rgba(0,0,0,.5);font-weight:900}
+.sub{opacity:.9;margin:0 0 16px;font-size:16px}
+#enterVR{font-size:28px;font-weight:900;padding:18px 44px;border:0;border-radius:18px;background:#ffb000;color:#3a1a00;box-shadow:0 6px 0 #a86200;cursor:pointer;letter-spacing:1px}
+#enterVR:disabled{background:#777;color:#ccc;box-shadow:0 6px 0 #444;cursor:default}
+#playDesk{margin-top:12px;font-size:15px;padding:10px 20px;border-radius:12px;border:2px solid #ffd23f;background:transparent;color:#ffd23f;cursor:pointer;font-weight:700}
+.row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin:12px 0}
+.row label{font-size:13px;opacity:.85;display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+.row input[type=text]{font-size:17px;padding:8px 10px;border-radius:10px;border:0;width:170px;background:#fff;color:#222;font-weight:700}
+.chk{flex-direction:row!important;align-items:center!important;font-size:15px!important;opacity:1!important;margin-top:16px}
+.how{text-align:left;font-size:14px;line-height:1.45;background:rgba(0,0,0,.3);border-radius:12px;padding:10px 14px;margin-top:14px}
+.how b{color:#ffd23f}
+#roomShow{font-size:15px;margin-top:8px}
+#roomShow b{color:#ffd23f;font-size:20px;letter-spacing:2px}
+#note{font-size:13px;color:#ffcf8a;min-height:16px;margin-top:6px}
+#hud{position:fixed;left:10px;top:10px;z-index:3;font-size:14px;background:rgba(0,0,0,.45);padding:8px 10px;border-radius:10px;line-height:1.4;display:none;pointer-events:none;max-width:60vw}
+#hud.on{display:block}
+#hud .it{color:#ff6a3a;font-weight:900}
+#hint{position:fixed;right:10px;bottom:10px;z-index:3;font-size:12px;background:rgba(0,0,0,.45);padding:6px 9px;border-radius:9px;display:none;pointer-events:none}
+#hint.on{display:block}
+</style>
+</head>
+<body>
+<div id="landing"><div class="card">
+  <h1>PRIMATE CHAOS</h1>
+  <p class="sub">Swing, climb and tag your way around the jungle.</p>
+  <button id="enterVR" disabled>Checking VR…</button><br>
+  <button id="playDesk">Play in this browser (no VR)</button>
+  <div id="note"></div>
+  <div class="row">
+    <label>Your name<input id="nameIn" type="text" maxlength="14" autocomplete="off"></label>
+    <label>Room code<input id="roomIn" type="text" maxlength="16" autocomplete="off"></label>
+  </div>
+  <div id="roomShow">Room: <b id="roomCode">PUBLIC</b> · share the link to play together</div>
+  <label class="chk"><input id="voiceIn" type="checkbox" checked> Voice chat (uses your mic, nearby players hear you)</label>
+  <div class="how">
+    <b>How to play (Meta Quest):</b> no joysticks. Put your hands on the ground and push off to move, like a gorilla. Swing your arms backwards to run, push down hard to jump.<br>
+    <b>Climb:</b> push against trees, rocks and the lower rock wall, or hold <b>grip</b> to grab and pull yourself up. The upper wall is too smooth to climb.<br>
+    <b>Vines:</b> hold <b>grip</b> on a vine to swing. Let go to fly.<br>
+    <b>Tag:</b> lava monkeys are IT. Touch others with a hand to infect them. When everyone is lava, a new round starts.<br>
+    <b>Bananas:</b> grab them for points. <b>Canopy course:</b> climb the tree with the sign to the start pad, then race to the finish.<br>
+    <b>Wrist:</b> look at your left wrist for bananas and timer. Tap the red button with your right hand to mute your mic.
+  </div>
+</div></div>
+<div id="hud"></div>
+<div id="hint">Drag/click: look · W A S D: swing arms · Space: jump · hold E: climb/grab vine · M: mute · Esc: menu</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
