@@ -562,6 +562,37 @@ const HELPERS = () => {
   ok(shaft.climb.onTop && shaft.climb.spawns === 0, 'climbing the shaft vine gets you out onto the mountain-top clearing ' + JSON.stringify(shaft.climb));
   ok(shaft.onClr && /clearing/.test(shaft.zone) && shaft.fall.plat === 'top clearing' && shaft.fall.back && Math.abs(shaft.fall.t - 2.0) < 0.1 && shaft.treeWall, 'clearing is open grass, tree wall to the west/north, falling off the south cliff (toward the start) returns you there ' + JSON.stringify(shaft));
 
+  const shaftBuild = await p.evaluate(() => {
+    const CX = MM.CX, T = MM.THREE, v = new T.Vector3(), sc = CX.SHAFT.c, sr = CX.SHAFT.r, Y = CX.CLR_Y, F = CX.F;
+    const dAt = (x, y, z) => { v.set(x, y, z); const q = MM.nearest(v); return { d: q.d, kind: q.col && q.col.kind }; };
+    const r = { wall: [], air: [], ground: [], hole: [] };
+    const ys = [CX.SHAFT.y0 - 0.5, (CX.SHAFT.y0 + Y) / 2, Y - 0.35];
+    for (let i = 0; i < 16; i++) {
+      const a = i / 16 * Math.PI * 2, cx = Math.cos(a), cz = Math.sin(a);
+      for (const y of ys) {
+        const wall = dAt(sc.x + cx * (sr + 0.08), y, sc.z + cz * (sr + 0.08));
+        const air = dAt(sc.x + cx * 0.2, y, sc.z + cz * 0.2);
+        r.wall.push(wall.d); r.air.push(air.d);
+      }
+    }
+    // clearing ground around the mouth is solid; the opening itself is open (probe just above the grass)
+    for (let i = 0; i < 16; i++) {
+      const a = i / 16 * Math.PI * 2, g = dAt(sc.x + Math.cos(a) * 1.8, Y + 0.05, sc.z + Math.sin(a) * 1.8);
+      r.ground.push({ d: g.d, kind: g.kind });
+      const h = dAt(sc.x + Math.cos(a) * 0.15, Y + 0.05, sc.z + Math.sin(a) * 0.15);
+      r.hole.push(h.d);
+    }
+    C.stand(sc.x + 2.2, sc.z, 0, Y);
+    r.stand = { y: +C.head().y.toFixed(2), gd: MM.PH.grounded, plat: MM.PH.lastPlat && MM.PH.lastPlat.id };
+    r.wallOk = r.wall.every(d => d < 0.12);
+    r.airOk = r.air.every(d => d > 0.25);
+    r.groundOk = r.ground.every(g => g.d < 0.2);
+    r.holeOk = r.hole.every(d => d > 0.25);
+    return r;
+  });
+  ok(shaftBuild.wallOk && shaftBuild.airOk, 'shaft has solid rock walls all the way round and up, with a 1.22 m open well down the middle ' + JSON.stringify({ wallMax: Math.max(...shaftBuild.wall).toFixed(3), airMin: Math.min(...shaftBuild.air).toFixed(3) }));
+  ok(shaftBuild.groundOk && shaftBuild.holeOk && shaftBuild.stand.gd && shaftBuild.stand.plat === 'top clearing', 'clearing ground around the shaft mouth is solid (only the opening is a hole) and walkable ' + JSON.stringify(shaftBuild.stand));
+
   // ---------- 12. players don't clip through each other; two won't fit on the shaft vine ----------
   const peers = await p.evaluate(() => {
     const r = {}, CX = MM.CX, BODY = MM.BODY_R;
@@ -765,8 +796,10 @@ const HELPERS = () => {
   await p.evaluate(() => MM.labelsSet(true));
   await shot('cave_spawn_ocean.png', [0, 2.4, 20], Math.PI, -0.28); // south edge: ground ends, drop where wall 3 was
   await shot('cave_wall12_labels.png', [-16, 5, 8], -0.91, 0.06); // from the west, both wall 1 and wall 2 in frame
-  await shot('cave_shaft_below.png', [3, F + 1.4, -38], 0, 1.15);
+  await shot('cave_shaft_below.png', [3, F + 1.4, -38], 0, 1.15); // looking up the shaft from the wide cave
   await shot('cave_shaft_vine.png', [3, F + 1.5, -42.3], 0, 1.2, [{ p: [ -0.1, 2.0, -0.1 ] }, { p: [ 0.1, 2.0, 0.1 ] }]);
+  await shot('cave_shaft_mid.png', [3, 12.9, -42.3], 0.12, 0.95); // inside the shaft, looking up the rock walls toward daylight
+  await shot('cave_clearing_shaft.png', [6.2, MM_CLR + 2.4, -39.2], 0.83, -0.55); // clearing ground around the shaft mouth from above
   await shot('cave_clearing_trees.png', [6.2, MM_CLR + 1.6, -39.5], 0.7, 0.05); // look NW at the tree wall
   await shot('cave_clearing_cliff.png', [6.2, MM_CLR + 1.8, -27.2], Math.PI, -0.18); // south lip, looking toward the start
   await shot('cave_pillar4_dark.png', [3, F + 1.5, -65], Math.PI / 2, -0.08); // from pillar 3, look left at pillar 4 and the void

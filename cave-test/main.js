@@ -2057,10 +2057,13 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
 // ===== shaft + mountain-top clearing (CXG.top); local RNG so jungle trees/bananas stay put =====
 {
   const rng = (() => { let x = 20261121; return () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) / 4294967296; }; })();
+  const rngG = (() => { let x = 20261127; return () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) / 4294967296; }; })();
   const rrL = (a, b) => a + rng() * (b - a);
+  const rrG = (a, b) => a + rngG() * (b - a);
   const rocks = ['#7d6a58', '#8a7663', '#6f5f50', '#958068', '#6a5848', '#82705e'];
   const greens = ['#5cbf4a', '#4fae40', '#69c957', '#58b84a', '#3fae3a'];
   const leafC2 = ['#3fae3a', '#5ccc3f', '#2f9a3a', '#7ad94a'];
+  const dirtC = ['#8a6e4e', '#7a5f40', '#6e5538', '#9a7a52', '#74583a'];
   const Y = CX.CLR_Y, sc = CX.SHAFT.c, sr = CX.SHAFT.r;
   const topM = new Merger();
   const cylABR = (mg, a, b, r0, r1, color, seg, vary) => {
@@ -2068,45 +2071,25 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
     const g = new THREE.CylinderGeometry(r1, r0, len, seg, 1, false);
     mg.add(g, color, M4(a.clone().add(b).multiplyScalar(0.5), qFromTo(UP, d)), vary, null, rng);
   };
-  // grass plateau with a hole for the shaft
+  const addFlat = (pts, color, vary, colorFn) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    topM.add(g, color, null, vary, colorFn, rngG);
+  };
+  const pushTri = (out, a, b, c) => { out.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z); };
+
+  // trees first, with the original rng stream, so their positions stay put
+  const tx = sc.x - 1.15, tz = sc.z - 0.15, th = 3.4;
   {
-    const nx = 26, nz = 16, x0 = -HALF + 0.15, x1 = HALF - 0.15, z0 = -51.2, z1 = -HALF - 0.2;
-    const posOf = (i, j) => {
-      const x = x0 + (x1 - x0) * i / nx, z = z0 + (z1 - z0) * j / nz;
-      const e = (rng() - 0.5) * 0.06;
-      return new V3(x, Y + e, z);
-    };
-    for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
-      const a = posOf(i, j), b = posOf(i + 1, j), c = posOf(i, j + 1), d = posOf(i + 1, j + 1);
-      const mid = new V3((a.x + d.x) / 2, Y, (a.z + d.z) / 2);
-      if (Math.hypot(mid.x - sc.x, mid.z - sc.z) < sr + 0.35) continue; // shaft hole
-      const col = (mid.x < -6 || mid.z < -47) ? '#4a8a38' : greens[(rng() * 5) | 0];
-      const tri = (p, q, r) => topM.add(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([p.x, p.y, p.z, q.x, q.y, q.z, r.x, r.y, r.z], 3)), col, null, 0.04, null, rng);
-      tri(a, b, c); tri(b, d, c);
-    }
-  }
-  // shaft tube (rock lining) from the dome ceiling up to the clearing, hole already cut in the dome mesh
-  {
-    const y0 = CX.SHAFT.y0 - 0.05, y1 = Y + 0.02, h = y1 - y0;
-    const tube = new THREE.CylinderGeometry(sr + 0.08, sr + 0.08, h, 12, 1, true);
-    topM.add(tube, '#5a5046', M4(new V3(sc.x, (y0 + y1) / 2, sc.z)), 0.08, null, rng);
-    // a slightly raised stone rim around the hole
-    topM.add(new THREE.TorusGeometry(sr + 0.22, 0.12, 6, 14), '#6a5c50', M4(new V3(sc.x, Y + 0.04, sc.z), new Q().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0))), 0.06, null, rng);
-  }
-  // the vine's tree at the rim (west-ish, so the vine hangs in the shaft centre)
-  {
-    const tx = sc.x - 1.15, tz = sc.z - 0.15, th = 3.4;
     const base = new V3(tx, Y - 0.2, tz), top = new V3(tx, Y + th, tz);
     cylABR(topM, base, top, 0.28, 0.18, '#7a4f2c', 7, 0.05);
     capColl(base, top, 0.26, 'trunk', 0.18);
     topM.add(new THREE.IcosahedronGeometry(1.5, 0), leafC2[(rng() * 4) | 0], M4(top.clone().add(new V3(0, 0.5, 0)), null, new V3(1.15, 0.7, 1.15)), 0.1, null, rng);
     topM.add(new THREE.IcosahedronGeometry(1.0, 0), leafC2[(rng() * 4) | 0], M4(top.clone().add(new V3(-0.5, 0.9, 0.3)), null, new V3(1, 0.7, 1)), 0.1, null, rng);
-    // a branch over the shaft the vine hangs from
     const ba = new V3(tx, Y + 2.9, tz), bb = new V3(sc.x, Y + 2.5, sc.z);
     cylABR(topM, ba, bb, 0.12, 0.08, '#8b5a33', 5, 0.05);
     capColl(ba, bb, 0.11, 'branch', 0.08);
   }
-  // trees to the left (west, -X) and north (-Z), thickening to a solid tree wall
   const clrTrees = [];
   const plantTree = (x, z, r, h, wall) => {
     const base = new V3(x, Y - 0.25, z), top = new V3(x, Y + h, z);
@@ -2116,21 +2099,18 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
     topM.add(new THREE.IcosahedronGeometry(r * 1.7, 0), leafC2[(rng() * 4) | 0], M4(top.clone().add(new V3(rrL(-1.1, 1.1), 1.1, rrL(-1.1, 1.1))), null, new V3(1, 0.7, 1)), 0.1, null, rng);
     clrTrees.push({ x, z, r, h, wall });
   };
-  // west thicket, denser toward x = -22
   for (let i = 0; i < 16; i++) {
     const x = -8 - rng() * 15, z = -28 - rng() * 22;
     if (Math.hypot(x - sc.x, z - sc.z) < 4.5) continue;
     if (x < -HALF + 0.8 || z > -HALF - 0.8 || z < -51) continue;
     plantTree(x, z, 0.45 + rng() * 0.35, 3.2 + rng() * 2.4, x < -16);
   }
-  // north thicket, denser toward z = -50
   for (let i = 0; i < 14; i++) {
     const x = -18 + rng() * 36, z = -47 - rng() * 4;
     if (Math.hypot(x - sc.x, z - sc.z) < 4.5) continue;
-    if (x > 20) continue; // leave the NE open so the exit ledges stay visible
+    if (x > 20) continue;
     plantTree(x, z, 0.5 + rng() * 0.3, 3.4 + rng() * 2.2, z < -49);
   }
-  // impassable tree wall along the west and north rims
   const wallPts = [];
   for (let z = -28; z > -51; z -= 1.35) wallPts.push([-22.6, z]);
   for (let x = -22; x < 16; x += 1.4) wallPts.push([x, -50.4]);
@@ -2138,6 +2118,82 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
     if (Math.hypot(x - sc.x, z - sc.z) < 5) continue;
     plantTree(x + rrL(-0.3, 0.3), z + rrL(-0.25, 0.25), 0.7, 4.2 + rng() * 1.2, true);
   }
+
+  // grass + dirt plateau: faces UP, clean circular hole at the shaft, no missing quads around the rim
+  const holeR = sr + 0.12;
+  const grassCol = (y, x, z) => {
+    const n = cxNoise(x * 0.28, z * 0.28, 44), n2 = cxNoise(x * 0.7, z * 0.7, 47);
+    if (n > 0.58 || n2 > 0.74) return dirtC[(Math.abs(Math.floor(x * 3 + z * 5)) % dirtC.length)];
+    if (x < -6 || z < -47) return '#4a8a38';
+    return greens[(Math.abs(Math.floor(x * 2.1 + z * 1.7)) % greens.length)];
+  };
+  {
+    const x0 = -HALF + 0.15, x1 = HALF - 0.15, z0 = -51.2, z1 = -HALF - 0.2;
+    const sh = new THREE.Shape();
+    sh.moveTo(x0, -z0); sh.lineTo(x1, -z0); sh.lineTo(x1, -z1); sh.lineTo(x0, -z1); sh.closePath();
+    const hole = new THREE.Path();
+    const hs = 20;
+    for (let i = 0; i <= hs; i++) {
+      const a = (i / hs) * Math.PI * 2, x = sc.x + Math.cos(a) * holeR, z = sc.z + Math.sin(a) * holeR;
+      if (i === 0) hole.moveTo(x, -z); else hole.lineTo(x, -z);
+    }
+    hole.closePath(); sh.holes.push(hole);
+    const gTop = new THREE.ShapeGeometry(sh).toNonIndexed();
+    gTop.rotateX(-Math.PI / 2);
+    const pa = gTop.attributes.position.array;
+    for (let i = 0; i < pa.length; i += 3) {
+      const d = Math.hypot(pa[i] - sc.x, pa[i + 2] - sc.z);
+      pa[i + 1] = d < holeR + 0.25 ? Y + 0.012 : Y + (cxNoise(pa[i] * 0.4, pa[i + 2] * 0.4, 41) - 0.5) * 0.07;
+    }
+    topM.add(gTop, '#58b84a', null, 0.04, grassCol, rngG);
+    // underside so the plateau is solid when you look up from the cave or the shaft
+    const under = [], rockFn = (y, x, z) => (cxNoise(x * 0.5, z * 0.5, 52) > 0.62 ? '#4a4036' : '#5a5046');
+    for (let i = 0; i < pa.length; i += 9) {
+      under.push(pa[i], pa[i + 1] - 0.1, pa[i + 2], pa[i + 6], pa[i + 7] - 0.1, pa[i + 8], pa[i + 3], pa[i + 4] - 0.1, pa[i + 5]);
+    }
+    addFlat(under, '#5a5046', 0.06, rockFn);
+    gTop.dispose();
+  }
+
+  // solid rock well: inner lining (visible from inside), outer shell, top rim, bottom flange onto the dome
+  const y0 = CX.SHAFT.y0 - 0.95, y1 = Y + 0.03, segs = 16, rings = 6, outerR = sr + 0.32, flangeR = sr + 0.7;
+  {
+    const inner = [], outer = [], rim = [], flange = [];
+    const at = (i, y, r, bump) => {
+      const a = (i / segs) * Math.PI * 2, e = bump ? 0.035 * (cxNoise(Math.cos(a) * 2.2, y * 0.7, 31) - 0.5) : 0;
+      return new V3(sc.x + Math.cos(a) * (r + e), y, sc.z + Math.sin(a) * (r + e));
+    };
+    for (let i = 0; i < segs; i++) for (let j = 0; j < rings; j++) {
+      const ya = y0 + (y1 - y0) * j / rings, yb = y0 + (y1 - y0) * (j + 1) / rings;
+      const a = at(i, ya, sr, true), b = at(i + 1, ya, sr, true), c = at(i, yb, sr, true), d = at(i + 1, yb, sr, true);
+      pushTri(inner, a, b, c); pushTri(inner, b, d, c); // inward
+      const A = at(i, ya, outerR, true), B = at(i + 1, ya, outerR, true), C = at(i, yb, outerR, true), D = at(i + 1, yb, outerR, true);
+      pushTri(outer, A, C, B); pushTri(outer, B, C, D); // outward
+    }
+    for (let i = 0; i < segs; i++) {
+      const i0 = at(i, y1, sr, false), i1 = at(i + 1, y1, sr, false), o0 = at(i, y1, outerR + 0.12, false), o1 = at(i + 1, y1, outerR + 0.12, false);
+      pushTri(rim, i0, i1, o0); pushTri(rim, i1, o1, o0); // up
+      const fi0 = at(i, y0, sr, false), fi1 = at(i + 1, y0, sr, false), fo0 = at(i, y0, flangeR, false), fo1 = at(i + 1, y0, flangeR, false);
+      pushTri(flange, fi0, fo0, fi1); pushTri(flange, fi1, fo0, fo1); // down, overlaps the dome hole
+    }
+    const wallFn = (y, x, z) => (cxNoise(x * 1.1, y * 0.6, 33) > 0.68 ? '#4a433c' : (y > Y - 0.4 ? '#6a5c50' : '#5a5046'));
+    addFlat(inner, '#5a5046', 0.08, wallFn);
+    addFlat(outer, '#4d443c', 0.08, wallFn);
+    addFlat(rim, '#6a5c50', 0.06, (y, x, z) => (cxNoise(x, z, 36) > 0.6 ? '#5a4e42' : '#6a5c50'));
+    addFlat(flange, '#4a433c', 0.07, wallFn);
+  }
+
+  // scattered rocks on the clearing (keep the shaft mouth, south cliff and spawn stand clear)
+  for (let i = 0; i < 16; i++) {
+    const a = rrG(0, Math.PI * 2), d = rrG(2.4, 11);
+    const x = sc.x + Math.cos(a) * d, z = sc.z + Math.sin(a) * d;
+    if (!inClrXZ({ x, z }) || z > -27.4 || x < -20 || z < -49.2) continue;
+    if (Math.hypot(x - 6.2, z + 39.5) < 1.6) continue;
+    const r = rrG(0.22, 0.55), c = new V3(x, Y + r * 0.28, z);
+    topM.add(new THREE.DodecahedronGeometry(r * 0.92, 0), rocks[(rngG() * rocks.length) | 0], M4(c, new Q().setFromEuler(new THREE.Euler(rngG(), rngG() * 6, rngG())), new V3(1, 0.8, 1)), 0.1, null, rngG);
+    addCol('rock', p => p.distanceTo(c) - r * 0.8, c, r, true, { clr: true });
+  }
+
   CXG.top.add(new THREE.Mesh(topM.build(), worldMat));
   // cheap daylight shaft: one spot + an unlit cone (culled with the group)
   const spot = new THREE.SpotLight(0xfff2c4, 3.4, 16, 0.32, 0.55, 1.1);
@@ -2149,15 +2205,17 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
   );
   cone.position.set(sc.x, CXF + coneH / 2, sc.z); cone.rotation.x = Math.PI; CXG.top.add(cone);
   scene.add(CXG.top);
-  // walkable clearing (hole at the shaft) + shaft walls
+  // walkable clearing (hole at the shaft) + shaft walls matching the rock well
   addCol('ground', p => {
     if (p.y < Y - 0.5 || !inClrXZ(p) || inShaftXZ(p, 0.02)) return 50; // thin plateau only — the cave underneath must stay hollow
     return (p.y - Y) * 0.95;
   }, new V3(0, Y, -38), 16, true, { clr: true });
   addCol('shaft', p => {
-    if (p.y < CX.SHAFT.y0 - 0.3 || p.y > Y + 0.25) return 99;
-    return CX.SHAFT.r - Math.hypot(p.x - sc.x, p.z - sc.z);
-  }, new V3(sc.x, (CX.SHAFT.y0 + Y) / 2, sc.z), 4, false);
+    if (p.y < y0 - 0.1 || p.y > Y - 0.12) return 99; // stop below the grass so the clearing stays walkable
+    const h = Math.hypot(p.x - sc.x, p.z - sc.z);
+    if (h > flangeR + 0.4) return 99;
+    return CX.SHAFT.r - h;
+  }, new V3(sc.x, (y0 + Y) / 2, sc.z), flangeR + 0.6, false);
   CX.clrTrees = clrTrees;
 }
 
