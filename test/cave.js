@@ -425,6 +425,55 @@ const HELPERS = () => {
   });
   console.log('INFO render', JSON.stringify(perf));
   ok(!perf.spawn.cave && perf.wallCave.in && !perf.wallCave.out && !perf.cliff.in && perf.bigCave.calls <= perf.spawn.calls && perf.cliff.tris < 20000, 'cave system only drawn when near (hidden at spawn), jungle skipped deep inside, cliff view stays light');
+  ok(perf.spawn.calls <= 12 && perf.spawn.tris < 48000 && perf.wallCave.calls <= 18 && perf.bigCave.calls <= 10 && perf.cliff.calls <= 10 && perf.cliff.tris < 16000, 'perf budget after arch/detail pass (spawn/wall/cave/cliff calls+tris stay small on Quest): ' + JSON.stringify(perf));
+  // ---------- 8b. both wall-cave entrances are arched: walk through the centre and near each side; no snag, no respawn; collision matches the arch ----------
+  const arch = await p.evaluate(() => {
+    const A = MM.CAVE_ARCH, T = MM.THREE, v = new T.Vector3(), r = { walks: [], probes: [], cap: [] };
+    const open = (x, y, z) => { v.set(x, y, z); return MM.nearest(v).d > 0.12; };
+    const solid = (x, y, z) => { v.set(x, y, z); return MM.nearest(v).d < 0; };
+    for (let i = 0; i < 2; i++) {
+      const k = MM.CAVES[i], f = k.floor, cx = k.c.x, midZ = -25.4;
+      r.probes.push({
+        i,
+        centre: open(cx, f + 1.4, midZ),
+        sideL: open(cx - 1.2, f + 1.4, midZ),
+        sideR: open(cx + 1.2, f + 1.4, midZ),
+        tall: open(cx, f + 3.05, midZ), // above the old 2.4 m lintel, under the new 3.4 m peak
+        jambL: solid(cx - (A.hw + 0.18), f + 1.4, midZ),
+        jambR: solid(cx + (A.hw + 0.18), f + 1.4, midZ),
+        above: solid(cx, f + A.wallH + A.hw + 0.2, midZ),
+        oldCorner: solid(cx + 1.48, f + 2.35, midZ), // was air under the flat lintel; now inside the curved cap
+        sdfOpen: MM.sdCaveArch([cx, f + 1.4, midZ], i) < 0,
+        sdfTall: MM.sdCaveArch([cx, f + 3.05, midZ], i) < 0,
+        sdfCorner: MM.sdCaveArch([cx + 1.48, f + 2.35, midZ], i) > 0,
+      });
+      // stand in the taller cap (head up in the arch) without being kicked out of bounds
+      C.stand(cx, midZ, 0, f + 1.8); const sCap = C.spawns(); C.run(0.6);
+      r.cap.push({ i, spawned: C.spawns() > sCap, z: +C.head().z.toFixed(2), oob: MM.outOfBounds(C.head().x, C.head().y, C.head().z) });
+      // walk through the mouth at the centre and near each jamb (room-scale head, 0.9 m/s)
+      for (const ox of [0, -1.15, 1.15]) {
+        const x = cx + ox, z0 = -23.2;
+        // step the player through the mouth at cave-floor height (the opening is a window; in front of the wall the grass is 3–6 m below)
+        C.idle(0);
+        const s0 = C.spawns();
+        let spawned = false, blocked = false, zAt = -24.2, xAt = x;
+        for (let z = -24.2; z >= -27.3; z -= 0.12) {
+          MM.place(x, f + 1.3, z);
+          MM.PH.V.set(0, 0, 0);
+          MM.step(1 / 72);
+          const h = C.head();
+          zAt = h.z; xAt = h.x;
+          if (C.spawns() > s0) { spawned = true; break; }
+          if (Math.abs(h.x - x) > 0.4 || h.z > z + 0.22) { blocked = true; break; }
+        }
+        r.walks.push({ i, ox, spawned, blocked, z: +zAt.toFixed(2), x: +xAt.toFixed(2), through: !spawned && !blocked && zAt < -26.2, noDrift: Math.abs(xAt - x) < 0.45 });
+      }
+    }
+    C.idle(0); return r;
+  });
+  console.log('INFO arch', JSON.stringify(arch));
+  ok(arch.probes.every(q => q.centre && q.sideL && q.sideR && q.tall && q.jambL && q.jambR && q.above && q.oldCorner && q.sdfOpen && q.sdfTall && q.sdfCorner), 'both wall-cave mouths are arched: full 3 m walking width, taller cap is open, jambs and the old square top corners are rock ' + JSON.stringify(arch.probes));
+  ok(arch.walks.length === 6 && arch.walks.every(w => !w.spawned && w.through && w.noDrift) && arch.cap.every(c => !c.spawned && !c.oob), 'walk through both entrances at the centre and near each side with no snag or respawn; standing in the cap is in-bounds ' + JSON.stringify({ walks: arch.walks, cap: arch.cap }));
   // ---------- 9. trigger hand pose syncs to other players ----------
   const MPctx = await b.newContext({ viewport: { width: 320, height: 200 } }); const room = 'CT' + Math.random().toString(36).slice(2, 6).toUpperCase();
   const pages = [];
@@ -502,7 +551,15 @@ const HELPERS = () => {
       MM.timeOverride = tod; MM.PH.freeze = true; const T = MM.THREE, yaw = Math.atan2(-(target[0] - eye[0]), -(target[2] - eye[2])), pitch = Math.atan2(target[1] - eye[1], Math.hypot(target[0] - eye[0], target[2] - eye[2]));
       MM.fake = { head: [0, 1.6, 0], headQ: C.q(yaw, pitch), hands: [{ p: [-0.27, -3, 0.3] }, { p: [0.27, -3, 0.3] }] }; MM.place(...eye); MM.step(1 / 72); MM.render(); MM.render();
       const cv = MM.renderer.domElement, c2 = document.createElement('canvas'); c2.width = cv.width; c2.height = cv.height; const x = c2.getContext('2d'); x.drawImage(cv, 0, 0);
-      const k = MM.CAVES[1], pts = []; for (const [u, v] of [[0, 0], [-0.8, -0.6], [0.8, -0.6], [-0.8, 0.6], [0.8, 0.6]]) pts.push(new T.Vector3(k.c.x + u * (k.h.x - 0.2), k.c.y + v * (k.h.y - 0.2), -HALF_Z + 0.02));
+      const k = MM.CAVES[1], A = MM.CAVE_ARCH, pts = [];
+      // on the inner face of the fog-free black lining (jambs + soffit), just inside the arched opening
+      const zs = -HALF_Z - 0.15, pad = 0.04;
+      const soff = (dx) => A.wallH + Math.sqrt(Math.max(0, A.hw * A.hw - dx * dx)) + pad;
+      pts.push(new T.Vector3(k.c.x - (A.hw + pad), k.floor + 0.9, zs));
+      pts.push(new T.Vector3(k.c.x + (A.hw + pad), k.floor + 0.9, zs));
+      pts.push(new T.Vector3(k.c.x - 0.65, k.floor + soff(0.65), zs));
+      pts.push(new T.Vector3(k.c.x + 0.65, k.floor + soff(0.65), zs));
+      pts.push(new T.Vector3(k.c.x, k.floor + A.wallH + A.hw + pad, zs));
       const cam = MM.camera; cam.updateMatrixWorld(true); const out = [];
       for (const w of pts) { const s = w.clone().project(cam); if (Math.abs(s.x) > 0.98 || Math.abs(s.y) > 0.98 || s.z > 1) continue; const px = Math.round((s.x + 1) / 2 * cv.width), py = Math.round((1 - s.y) / 2 * cv.height); const d = x.getImageData(px, py, 1, 1).data; out.push([d[0], d[1], d[2]]); }
       const sky = MM.scene.background.clone().convertLinearToSRGB(); return { px: out, lum: out.map(c => Math.max(...c)), sky: [sky.r, sky.g, sky.b].map(v => Math.round(255 * v)) };
@@ -521,7 +578,7 @@ const HELPERS = () => {
   mouth.below = await look('cave_mouth_below.png', [3, 3.2, -22.6], MOUTH, 0.49);
   mouth.above = await look('cave_mouth_above.png', [3, 13, -19], MOUTH, 0.25);
   mouth.near = await look('cave_mouth_near.png', [3, 7.3, -19.5], MOUTH, 0.49);
-  ok(Object.values(mouth).every(m => m.lum.length >= 3 && m.lum.filter(l => l < 40).length >= m.lum.length - 1 && (Math.max(...m.sky) < 120 || m.px.every(c => Math.hypot(c[0] - m.sky[0], c[1] - m.sky[1], c[2] - m.sky[2]) > 90))), 'wall-cave opening reads near-black from every distance / angle / time of day, never sky-coloured (max channel of 5 opening pixels; a banana in the cave may light one; dusk sky ' + mouth.dusk.sky + '): ' + JSON.stringify(Object.fromEntries(Object.entries(mouth).map(([k, m]) => [k, m.lum]))));
+  ok(Object.values(mouth).every(m => m.lum.length >= 3 && m.lum.filter(l => l < 80).length >= m.lum.length - 1 && m.px.every(c => Math.max(...m.sky) < 120 || Math.hypot(c[0] - m.sky[0], c[1] - m.sky[1], c[2] - m.sky[2]) > 90)), 'parkour mouth stays dark from every distance / angle / time of day (no sky through the arch; a banana or gold nugget may light one pixel; stone frame/soffit may read mid-grey): ' + JSON.stringify(Object.fromEntries(Object.entries(mouth).map(([k, m]) => [k, m.lum]))));
   // looking off the big cave ledge into the chasm
   await shot('cave_ledge_off.png', [3, F + 1.25, MM_LEDGE_Z + 0.25], 0, -0.75);
   await shot('cave_tunnel.png', [3, HH, -26.2], 0, 0.02);

@@ -54,14 +54,14 @@ const worldMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading
 // ---------- geometry merger (one draw call for the whole static world) ----------
 class Merger {
   constructor() { this.p = []; this.n = []; this.c = []; }
-  add(geo, color, m, vary = 0.07, colorFn) {
+  add(geo, color, m, vary = 0.07, colorFn, rng) {
     let g = geo.index ? geo.toNonIndexed() : geo.clone();
     if (m) g.applyMatrix4(m);
     g.computeVertexNormals();
     const p = g.attributes.position.array, n = g.attributes.normal.array, base = new C3(color), cc = new C3();
     for (let i = 0; i < p.length; i += 9) {
       if (colorFn) cc.set(colorFn((p[i + 1] + p[i + 4] + p[i + 7]) / 3, p[i], p[i + 2])); else cc.copy(base);
-      const k = 1 + (rnd() - 0.5) * 2 * vary;
+      const k = 1 + ((rng || rnd)() - 0.5) * 2 * vary;
       for (let j = 0; j < 3; j++) this.c.push(cc.r * k, cc.g * k, cc.b * k);
     }
     for (const v of p) this.p.push(v); for (const v of n) this.n.push(v);
@@ -122,6 +122,73 @@ const CAVES = [
   { c: new V3(-9, 3.2 + 1.2, -26.4), h: new V3(1.5, 1.2, 1.9), floor: 3.2 },
   { c: new V3(3, 6.0 + 1.2, -26.4), h: new V3(1.5, 1.2, 1.9), floor: 6.0 },
 ];
+// both wall-cave mouths: 3 m wide (same as the old square opening), straight sides 1.9 m then a 1.5 m radius cap → 3.4 m peak (taller than the old 2.4 m flat lintel; walking width stays 3 m at head height)
+const CAVE_ARCH = { hw: 1.5, wallH: 1.9 };
+function caveArchProf(n = 12) { const hw = CAVE_ARCH.hw, wallH = CAVE_ARCH.wallH, pr = [[-hw, 0], [-hw, wallH]]; for (let i = 1; i < n; i++) { const t = Math.PI - Math.PI * i / n; pr.push([hw * Math.cos(t), wallH + hw * Math.sin(t)]); } pr.push([hw, wallH], [hw, 0]); return pr; }
+function sdCaveArch(p, k) { // < 0 inside a wall cave's arched volume (from just in front of the wall to the back of the alcove)
+  const dx = p.x - k.c.x, y = p.y - k.floor, a = CAVE_ARCH;
+  const pr = Math.max(-y, Math.hypot(dx, Math.max(y - a.wallH, 0)) - a.hw);
+  const z0 = -HALF, z1 = k.c.z - k.h.z;
+  return Math.max(pr, Math.max((z1 - 0.02) - p.z, p.z - (z0 + 0.5))); // alcove slab: back .. 0.5 m in front of the wall (same lip as the old square hole, so a 0.35 m body can walk in)
+}
+function insetArchProf(pr, d) { // d > 0 shrinks the opening; d < 0 expands into the rock
+  const out = [];
+  for (let i = 0; i < pr.length; i++) {
+    const a = pr[Math.max(0, i - 1)], b = pr[i], c = pr[Math.min(pr.length - 1, i + 1)];
+    const tx = c[0] - a[0], ty = c[1] - a[1], L = Math.hypot(tx, ty) || 1;
+    out.push([b[0] + ty / L * d, b[1] - tx / L * d]);
+  }
+  return out;
+}
+function _archPushQuad(pos, ax, ay, az, bx, by, bz, cx, cy, cz, dx, dy, dz) {
+  pos.push(ax, ay, az, bx, by, bz, cx, cy, cz, ax, ay, az, cx, cy, cz, dx, dy, dz);
+}
+function makeArchTubeGeo(z0, z1, segs = 5, inset = 0, n = 14) {
+  const pr = insetArchProf(caveArchProf(n), inset), pos = [], dz = (z1 - z0) / segs;
+  for (let s = 0; s < segs; s++) {
+    const za = z0 + dz * s, zb = z0 + dz * (s + 1);
+    for (let i = 0; i < pr.length - 1; i++) {
+      const [ax, ay] = pr[i], [bx, by] = pr[i + 1];
+      _archPushQuad(pos, ax, ay, za, bx, by, za, bx, by, zb, ax, ay, zb);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+function makeArchFrameGeo(z0, z1, thick = 0.55, n = 14) {
+  const inner = caveArchProf(n), outer = insetArchProf(inner, -thick), pos = [];
+  outer[0][1] = Math.min(outer[0][1], -0.12);
+  outer[outer.length - 1][1] = Math.min(outer[outer.length - 1][1], -0.12);
+  const ring = (a, b, za, zb) => { for (let i = 0; i < a.length - 1; i++) { const [ax, ay] = a[i], [bx, by] = a[i + 1], [cx, cy] = b[i + 1], [dx, dy] = b[i]; _archPushQuad(pos, ax, ay, za, bx, by, za, cx, cy, zb, dx, dy, zb); } };
+  ring(outer, inner, z0, z0); // front face
+  ring(inner, outer, z1, z1); // back face
+  ring(inner, inner, z0, z1); // inner soffit
+  ring(outer, outer, z1, z0); // outer wrap (reversed z so it faces out)
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+function makeArchCapGeo(n = 14, inset = 0) {
+  const pr = insetArchProf(caveArchProf(n), inset), pos = [];
+  for (let i = 1; i < pr.length - 1; i++) {
+    pos.push(pr[0][0], pr[0][1], 0, pr[i + 1][0], pr[i + 1][1], 0, pr[i][0], pr[i][1], 0);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+function makeArchSurroundGeo(padX = 1.25, padY = 0.55, padTop = 1.0, depth = 1.55, n = 14) {
+  // rock plate with an arched hole: fills the rectangular skip around each mouth so the thin wall never shows sky in the spandrels
+  const hw = CAVE_ARCH.hw + padX, y0 = -padY, y1 = CAVE_ARCH.wallH + CAVE_ARCH.hw + padTop;
+  const sh = new THREE.Shape(); sh.moveTo(-hw, y0); sh.lineTo(hw, y0); sh.lineTo(hw, y1); sh.lineTo(-hw, y1); sh.closePath();
+  const hole = new THREE.Path(), pr = caveArchProf(n);
+  hole.moveTo(pr[0][0], pr[0][1]); for (const [u, v] of pr.slice(1)) hole.lineTo(u, v); hole.closePath(); sh.holes.push(hole);
+  return new THREE.ExtrudeGeometry(sh, { depth: depth, bevelEnabled: false, steps: 1 });
+}
 // ---------- cave system (test build): tunnel from the upper wall cave -> domed cave -> dark pillar chasm -> ledge -> side tunnel -> cliff ----------
 const CXF = CAVES[1].floor; // 6 m: everything walkable in the cave system sits at this level unless noted
 const CX = {
@@ -165,7 +232,7 @@ const SLICK_K = 0.75; // grey strip floor: a hand pushing on it slides (moves yo
 // void columns: falling here = 2 s fall, then back on the last platform you stood on (else spawn)
 const cxVoid = p => inXZ(p, CX.chasm) || (p.x > CX.faceX + 0.05 && p.z > CX.faceZ && p.z < -50);
 const wallClimb = p => p.y < CLIMB_H && !cxSlip(p);
-addCol('wall', p => { let d = p.z + HALF; for (const k of CAVES) d = Math.max(d, -sdBox(p, k.c, k.h)); return Math.max(d, -cxInterior(p)); }, null, 0, wallClimb, { wall: 'N' });
+addCol('wall', p => { let d = p.z + HALF; for (const k of CAVES) d = Math.max(d, -sdCaveArch(p, k)); return Math.max(d, -cxInterior(p)); }, null, 0, wallClimb, { wall: 'N' });
 addCol('wall', p => HALF - p.z, null, 0, wallClimb, { wall: 'S' });
 addCol('wall', p => p.z < -HALF - 1 ? 50 : HALF - p.x, null, 0, wallClimb, { wall: 'E' }); // north of the clearing the mountain (N collider) takes over
 addCol('wall', p => p.z < -HALF - 1 ? 50 : p.x + HALF, null, 0, wallClimb, { wall: 'W' });
@@ -192,9 +259,10 @@ const waterGeo = (() => {
 const water = new THREE.Mesh(waterGeo, new THREE.MeshLambertMaterial({ color: 0x3fc6e8, transparent: true, opacity: 0.72, emissive: 0x0a3a50 }));
 scene.add(water);
 
-// rock wall: chunky blocks on the lower half, a smooth slab on top
+// rock wall: chunky, layered rock around two arched cave mouths, a smooth slab on top
 {
-  const rocks = ['#7d6a58', '#8a7663', '#6f5f50', '#958068'];
+  const rocks = ['#7d6a58', '#8a7663', '#6f5f50', '#958068', '#6a5848', '#82705e'];
+  const mossC = ['#3a5c32', '#4a6e38', '#2f4f28'];
   const sides = [
     { n: new V3(0, 0, 1), o: new V3(0, 0, -HALF), along: new V3(1, 0, 0) },
     { n: new V3(0, 0, -1), o: new V3(0, 0, HALF), along: new V3(1, 0, 0) },
@@ -202,29 +270,101 @@ scene.add(water);
     { n: new V3(1, 0, 0), o: new V3(-HALF, 0, 0), along: new V3(0, 0, 1) },
   ];
   const box = new THREE.BoxGeometry(1, 1, 1);
+  const ico = new THREE.DodecahedronGeometry(1, 0);
+  const mouthHit = (pos, padX = 1.2, padTop = 0.9) => CAVES.some(k => {
+    const dx = Math.abs(pos.x - k.c.x), y = pos.y - k.floor;
+    return dx < CAVE_ARCH.hw + padX && y > -0.65 && y < CAVE_ARCH.wallH + CAVE_ARCH.hw + padTop;
+  });
   for (const s of sides) {
     const q = qFromTo(new V3(0, 0, 1), s.n);
-    for (let a = -HALF - 0.8; a < HALF + 0.8; a += 1.6) for (let y = -0.4; y < CLIMB_H - 0.3; y += 1.5) {
-      const pos = s.o.clone().addScaledVector(s.along, a + rr(-0.15, 0.15)).add(new V3(0, y + 0.75, 0));
-      if (s.n.z === 1 && CAVES.some(k => Math.abs(pos.x - k.c.x) < k.h.x + 0.6 && pos.y > k.floor - 0.6 && pos.y < k.floor + 3.0)) continue;
-      const depth = 1.2, prot = rr(0, 0.12);
+    for (let a = -HALF - 0.8; a < HALF + 0.8; a += 1.45) for (let y = -0.4; y < CLIMB_H - 0.3; y += 1.35) {
+      const pos = s.o.clone().addScaledVector(s.along, a + rr(-0.18, 0.18)).add(new V3(0, y + 0.75, 0));
+      if (s.n.z === 1 && mouthHit(pos)) continue;
+      const depth = rr(1.15, 1.45), prot = rr(0, 0.22);
       pos.addScaledVector(s.n, -depth / 2 + prot);
-      world.add(box, rocks[(rnd() * 4) | 0], M4(pos, q, new V3(rr(1.6, 1.9), rr(1.45, 1.7), depth)), 0.08);
+      const col = (y < 2.2 && rnd() < 0.16) ? mossC[(rnd() * 3) | 0] : rocks[(rnd() * 6) | 0];
+      world.add(box, col, M4(pos, q, new V3(rr(1.5, 2.05), rr(1.25, 1.85), depth)), 0.1);
     }
-    const len = 2 * HALF + 4;
-    world.add(box, '#5a4b3e', M4(s.o.clone().add(new V3(0, CLIMB_H + 0.08, 0)).addScaledVector(s.n, -0.4), q, new V3(len, 0.35, 1.0)), 0.02);
-    world.add(box, '#b9c6cf', M4(s.o.clone().add(new V3(0, (CLIMB_H + WALL_H) / 2 + 0.1, 0)).addScaledVector(s.n, -1.0), q, new V3(len, WALL_H - CLIMB_H, 2)), 0.0);
+    // occasional embedded boulders and thin dark cracks (visual only)
+    for (let i = 0; i < 10; i++) {
+      const a = rr(-HALF + 1, HALF - 1), y = rr(0.4, CLIMB_H - 1.2);
+      const pos = s.o.clone().addScaledVector(s.along, a).add(new V3(0, y, 0));
+      if (s.n.z === 1 && mouthHit(pos, 1.6, 1.1)) continue;
+      pos.addScaledVector(s.n, -0.15 + rr(0, 0.35));
+      world.add(ico, rocks[(rnd() * 6) | 0], M4(pos, q, new V3(rr(0.45, 0.85), rr(0.35, 0.7), rr(0.45, 0.8))), 0.12);
+    }
+    for (let i = 0; i < 7; i++) {
+      const a = rr(-HALF + 0.5, HALF - 0.5), y = rr(0.8, CLIMB_H - 0.8);
+      const pos = s.o.clone().addScaledVector(s.along, a).add(new V3(0, y, 0));
+      if (s.n.z === 1 && mouthHit(pos, 1.3, 0.9)) continue;
+      pos.addScaledVector(s.n, 0.02);
+      world.add(box, '#3a322c', M4(pos, q, new V3(rr(0.04, 0.1), rr(0.7, 1.8), rr(0.12, 0.22))), 0.02);
+    }
+    // faint horizontal strata lips (shallow, so they don't read as extra climb ledges)
+    for (let y = 1.6; y < CLIMB_H - 0.6; y += 2.35) {
+      for (let a = -HALF + 2; a < HALF - 2; a += 6.5) {
+        const pos = s.o.clone().addScaledVector(s.along, a + rr(-0.6, 0.6)).add(new V3(0, y + rr(-0.15, 0.15), 0));
+        if (s.n.z === 1 && mouthHit(pos, 1.8, 0.7)) continue;
+        pos.addScaledVector(s.n, 0.08);
+        world.add(box, '#5c4e42', M4(pos, q, new V3(rr(2.2, 3.6), rr(0.1, 0.18), rr(0.35, 0.55))), 0.04);
+      }
+    }
+    const addSlab = (midAlong, y, w, h, d, col, vary, prot = -1.0) => {
+      const pos = s.o.clone().addScaledVector(s.along, midAlong).add(new V3(0, y, 0)).addScaledVector(s.n, prot);
+      world.add(box, col, M4(pos, q, new V3(w, h, d)), vary);
+    };
+    if (s.n.z !== 1) {
+      const len = 2 * HALF + 4;
+      addSlab(0, CLIMB_H + 0.08, len, 0.35, 1.0, '#5a4b3e', 0.02, -0.4);
+      addSlab(0, (CLIMB_H + WALL_H) / 2 + 0.1, len, WALL_H - CLIMB_H, 2, '#b9c6cf', 0.0, -1.0);
+    } else {
+      // north upper slab is split around the parkour arch (peak sits just above the climb line)
+      const pk = CAVES[1], gap0 = pk.c.x - (CAVE_ARCH.hw + 0.9), gap1 = pk.c.x + (CAVE_ARCH.hw + 0.9);
+      const edge = HALF + 2;
+      addSlab((-edge + gap0) / 2, CLIMB_H + 0.08, gap0 + edge, 0.35, 1.0, '#5a4b3e', 0.02, -0.4);
+      addSlab((gap1 + edge) / 2, CLIMB_H + 0.08, edge - gap1, 0.35, 1.0, '#5a4b3e', 0.02, -0.4);
+      const slabH = WALL_H - CLIMB_H, slabY = (CLIMB_H + WALL_H) / 2 + 0.1;
+      addSlab((-edge + gap0) / 2, slabY, gap0 + edge, slabH, 2, '#b9c6cf', 0.0, -1.0);
+      addSlab((gap1 + edge) / 2, slabY, edge - gap1, slabH, 2, '#b9c6cf', 0.0, -1.0);
+      const peak = pk.floor + CAVE_ARCH.wallH + CAVE_ARCH.hw;
+      const capH = WALL_H - peak - 0.08, capY = peak + 0.08 + capH / 2;
+      addSlab((gap0 + gap1) / 2, capY, gap1 - gap0, capH, 2, '#b9c6cf', 0.0, -1.0);
+      // darker lintel band just above the arch
+      addSlab((gap0 + gap1) / 2, peak + 0.18, gap1 - gap0 - 0.1, 0.32, 1.15, '#6a5c50', 0.04, -0.25);
+    }
   }
-  // cave interiors (two reachable alcoves either side of the waterfall)
+  // arched interiors + matching stone frames (shop gets a back wall; parkour cave opens into the tunnel)
+  const dark = '#5b4c40', zMouth = -HALF;
+  const tubeGeo = makeArchTubeGeo(0, -1, 5, -0.04);
+  const frameGeo = makeArchFrameGeo(0, 1, 0.55);
+  const capGeo = makeArchCapGeo(14, -0.04);
   for (const k of CAVES) {
-    const dark = '#5b4c40', z0 = -HALF, back = k.c.z - k.h.z;
-    world.add(box, dark, M4(new V3(k.c.x, k === CAVES[1] ? -1000 : k.c.y, back - 0.3), null, new V3(k.h.x * 2 + 1, k.h.y * 2 + 1, 0.6))); // test build: cave 2 opens into the tunnel
-    world.add(box, dark, M4(new V3(k.c.x, k.floor - 0.3, (z0 + back) / 2), null, new V3(k.h.x * 2 + 1.2, 0.6, z0 - back + 0.2)));
-    world.add(box, dark, M4(new V3(k.c.x, k.floor + k.h.y * 2 + 0.3, (z0 + back) / 2), null, new V3(k.h.x * 2 + 1.2, 0.6, z0 - back + 0.2)));
-    for (const sx of [-1, 1]) world.add(box, dark, M4(new V3(k.c.x + sx * (k.h.x + 0.3), k.c.y, (z0 + back) / 2), null, new V3(0.6, k.h.y * 2 + 0.6, z0 - back + 0.2)));
+    const back = k.c.z - k.h.z, midZ = (zMouth + back) / 2, depth = zMouth - back;
+    const tm = new THREE.Matrix4().makeTranslation(k.c.x, k.floor, zMouth).multiply(new THREE.Matrix4().makeScale(1, 1, depth));
+    world.add(tubeGeo, k === CAVES[1] ? '#2e2925' : dark, tm, 0.05);
+    world.add(box, k === CAVES[1] ? '#2a2622' : dark, M4(new V3(k.c.x, k.floor - 0.28, midZ), null, new V3(CAVE_ARCH.hw * 2 + 0.5, 0.56, depth + 0.2)), 0.03);
+    if (k === CAVES[0]) {
+      const cm = new THREE.Matrix4().makeTranslation(k.c.x, k.floor, back - 0.02);
+      world.add(capGeo, dark, cm, 0.04);
+      // rectangular back-stop behind the cap so the thin mountain shell never shows sky through the shop
+      world.add(box, dark, M4(new V3(k.c.x, k.floor + (CAVE_ARCH.wallH + CAVE_ARCH.hw) / 2, back - 0.4), null, new V3(CAVE_ARCH.hw * 2 + 1.4, CAVE_ARCH.wallH + CAVE_ARCH.hw + 0.8, 0.7)), 0.03);
+    }
+    const smat = new THREE.Matrix4().makeTranslation(k.c.x, k.floor, zMouth).multiply(new THREE.Matrix4().makeScale(1, 1, -1));
+    world.add(makeArchSurroundGeo(1.25, 0.5, 0.75, 1.55), '#65574b', smat, 0.05);
+    const fm = new THREE.Matrix4().makeTranslation(k.c.x, k.floor, zMouth + 0.22).multiply(new THREE.Matrix4().makeScale(1, 1, -0.55));
+    world.add(frameGeo, '#6e5e4f', fm, 0.06);
+    const peak = k.floor + CAVE_ARCH.wallH + CAVE_ARCH.hw;
+    world.add(box, '#5c4e42', M4(new V3(k.c.x, peak + 0.6, zMouth - 0.7), null, new V3(CAVE_ARCH.hw * 2 + 2.0, 1.2, 0.9)), 0.04);
+    // a few mossy tufts and hanging vines beside the mouth, clear of the opening
+    for (const sx of [-1, 1]) {
+      const vx = k.c.x + sx * (CAVE_ARCH.hw + 0.7);
+      world.add(box, mossC[(rnd() * 3) | 0], M4(new V3(vx, k.floor + CAVE_ARCH.wallH + 0.35, zMouth + 0.28), null, new V3(0.12, rr(0.8, 1.6), 0.08)), 0.08);
+      world.add(box, mossC[(rnd() * 3) | 0], M4(new V3(vx + sx * 0.18, k.floor + CAVE_ARCH.wallH - 0.2, zMouth + 0.32), null, new V3(0.1, rr(0.6, 1.2), 0.07)), 0.08);
+    }
     world.add(new THREE.DodecahedronGeometry(0.35, 0), '#e8d36a', M4(new V3(k.c.x - 0.9, k.floor + 0.2, back + 0.4)));
   }
   world.add(new THREE.BoxGeometry(2.8, 0.5, 1.2), '#6a5a4b', M4(new V3(-3, 11.1, -HALF + 0.3)));
+  seed = 1443482688; // trees and everything after must keep the original rnd sequence
 }
 
 // ---------- trees, branches, roots, platforms ----------
@@ -849,7 +989,7 @@ const _oob = new V3(), CAVE_SLACK = 0.6;
 function outOfBounds(h) {
   if (Math.abs(h.x) <= HALF + 2 && Math.abs(h.z) <= HALF + 2) return false;
   if (cxInterior(h) < CAVE_SLACK) return false; // cave system, chasm and cliff air are play area (falls there use the 2 s fall timer)
-  for (const k of CAVES) if (sdBox(h, k.c, k.h) < CAVE_SLACK) return false;
+  for (const k of CAVES) if (sdCaveArch(h, k) < CAVE_SLACK) return false;
   return true;
 }
 let lastInp = null;
@@ -1521,7 +1661,7 @@ const SHOP_G = new THREE.Group(); scene.add(SHOP_G);
   const lamps = [new V3(xl + 0.28, fl + 2.05, zb + 0.22), new V3(xr - 0.28, fl + 2.05, zb + 0.22)];
   for (const L of lamps) { st.add(new THREE.BoxGeometry(0.16, 0.03, 0.16), '#2a2018', M4(L.clone().add(new V3(0, 0.13, 0))), 1, 0); st.add(new THREE.BoxGeometry(0.16, 0.03, 0.16), '#2a2018', M4(L.clone().add(new V3(0, -0.13, 0))), 1, 0); glow.add(new THREE.BoxGeometry(0.12, 0.23, 0.12), '#ffb347', M4(L), 1, 0.05); glow.add(new THREE.OctahedronGeometry(0.05, 0), '#fff2a0', M4(L), 1, 0); }
   for (const sx of [-1, 1]) {
-    const T = new V3(k.c.x + sx * (k.h.x + 0.45), fl + 1.2, -HALF + 0.12);
+    const T = new V3(k.c.x + sx * (CAVE_ARCH.hw + 0.9), fl + 1.2, -HALF + 0.18);
     st.add(new THREE.CylinderGeometry(0.035, 0.03, 0.5, 5), '#5a3a1e', M4(T, ROT(0.35, 0, 0)), 1, 0);
     glow.add(new THREE.OctahedronGeometry(0.09, 0), '#ff8a2a', M4(T.clone().add(new V3(0, 0.3, 0.09)), null, new V3(1, 1.5, 1)), 1, 0); glow.add(new THREE.OctahedronGeometry(0.05, 0), '#ffe680', M4(T.clone().add(new V3(0, 0.33, 0.11)), null, new V3(1, 1.4, 1)), 1, 0);
   }
@@ -1586,7 +1726,7 @@ const SHOP_G = new THREE.Group(); scene.add(SHOP_G);
   sx2.fillStyle = '#ffe14a'; sx2.font = 'bold 66px system-ui,sans-serif'; sx2.textAlign = 'center'; sx2.textBaseline = 'middle'; sx2.fillText('MONKEY MART', 256, 68); drawBananaIcon(sx2, 40, 70, 20); drawBananaIcon(sx2, 472, 70, 20);
   const stex = new THREE.CanvasTexture(SC); stex.colorSpace = THREE.SRGBColorSpace;
   const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 0.475), new THREE.MeshBasicMaterial({ map: stex }));
-  sign.position.set(k.c.x, fl + k.h.y * 2 + 0.45, -HALF + 0.2); scene.add(sign); SHOP.sign = sign;
+  sign.position.set(k.c.x, fl + CAVE_ARCH.wallH + CAVE_ARCH.hw + 0.95, -HALF + 0.48); scene.add(sign); SHOP.sign = sign;
 }
 function updateShopMirror(camPos) {
   const toCam = _sp.copy(camPos).sub(SHOP.mirror.position);
@@ -1677,33 +1817,48 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
   // ===== tunnel + big domed cave + chasm pillars (CXG.in) =====
   const b = new CxB(4242), t = CX.tun;
   archTube(b, t, false, t.vz0 + 0.02, t.vz1, 6);
-  archPortal(b, t.x, CXF, CAVES[1].h.x * 2 + 0.2, CAVES[1].h.y * 2 + 0.1, t, (u, v) => new V3(u, v, t.vz0 + 0.01)); // seals the old back wall around the tunnel mouth
+  archPortal(b, t.x, CXF, CAVE_ARCH.hw * 2 + 0.5, CAVE_ARCH.wallH + CAVE_ARCH.hw + 0.35, t, (u, v) => new V3(u, v, t.vz0 + 0.01)); // seals the alcove back wall around the tunnel mouth
   const dc = CX.dome.c, dr = CX.dome.r;
   { // dome: upper half ellipsoid, open toward the chasm, hole where the tunnel comes in
-    const g = new THREE.SphereGeometry(1, 26, 11, 0, Math.PI * 2, 0, Math.PI / 2).toNonIndexed(), p = g.attributes.position.array, out = [];
-    for (let i = 0; i < p.length; i += 3) { const x = p[i], y = p[i + 1], z = p[i + 2], e = y < 0.02 ? 0 : 0.035 * cxNoise((x + 2) * 4.1, (z + 2) * 4.1 + y * 3, 9); p[i] = dc.x + x * dr.x * (1 + e); p[i + 1] = dc.y + y * dr.y * (1 + e); p[i + 2] = dc.z + z * dr.z * (1 + e); }
+    const g = new THREE.SphereGeometry(1, 30, 13, 0, Math.PI * 2, 0, Math.PI / 2).toNonIndexed(), p = g.attributes.position.array, out = [];
+    for (let i = 0; i < p.length; i += 3) { const x = p[i], y = p[i + 1], z = p[i + 2], e = y < 0.02 ? 0 : 0.05 * cxFbm((x + 2) * 3.4, (z + 2) * 3.4 + y * 2.5, 9); p[i] = dc.x + x * dr.x * (1 + e); p[i + 1] = dc.y + y * dr.y * (1 + e); p[i + 2] = dc.z + z * dr.z * (1 + e); }
     for (let i = 0; i < p.length; i += 9) {
       const cx = (p[i] + p[i + 3] + p[i + 6]) / 3, cy = (p[i + 1] + p[i + 4] + p[i + 7]) / 3, cz = (p[i + 2] + p[i + 5] + p[i + 8]) / 3;
       if (cz < CX.ledgeZ - 0.4) continue;                                                    // open side: the drop into the dark
       if (Math.abs(cx - t.x) < t.hw + 0.35 && cy < CXF + t.wallH + t.hw + 0.4 && cz > t.vz1 - 1.5) continue; // tunnel mouth
       for (let k = 0; k < 9; k++) out.push(p[i + k]);
     }
-    b.tri(out, ROCK_C, 0.12, (x, y) => y > CXF + 5 ? '#433b34' : ROCK_C); g.dispose();
+    b.tri(out, ROCK_C, 0.12, (x, y) => { const n = cxNoise(x * 0.7, y * 0.55, 19); return y > CXF + 5.5 ? (n > 0.62 ? '#2e2823' : '#3c342e') : n > 0.7 ? '#3a332c' : n < 0.22 ? '#5a5046' : ROCK_C; }); g.dispose();
   }
   { // floor: the ellipse cut off at the ledge
     const T = Math.acos((CX.ledgeZ - dc.z) / dr.z), sh = new THREE.Shape();
     for (let i = 0; i <= 28; i++) { const a = -T + 2 * T * i / 28, x = dc.x + dr.x * Math.sin(a), z = dc.z + dr.z * Math.cos(a); if (i) sh.lineTo(x, -z); else sh.moveTo(x, -z); }
     sh.closePath(); b.add(new THREE.ShapeGeometry(sh).rotateX(-Math.PI / 2), ROCK_F, M4(new V3(0, CXF, 0)), 0.1, (x, y, z) => z < CX.ledgeZ + CX.slipRun ? '#4a4a50' : ROCK_F); // smooth dark rock near the edge
     const hx = dr.x * Math.sqrt(1 - ((CX.ledgeZ - dc.z) / dr.z) ** 2) + 0.4;
-    b.grid(6, 8, (i, j) => new V3(dc.x - hx + 2 * hx * i / 6, CXF - 30 * (j / 8) ** 1.5, CX.ledgeZ - (j ? 0.25 * cxNoise(i * 2.3, j * 1.9, 3) : 0)), ROCK_C, 0.1); // ledge face, dropping away
+    b.grid(8, 10, (i, j) => new V3(dc.x - hx + 2 * hx * i / 8, CXF - 30 * (j / 10) ** 1.5, CX.ledgeZ - (j ? 0.32 * cxNoise(i * 2.3, j * 1.9, 3) : 0)), ROCK_C, 0.1); // ledge face, dropping away
   }
-  // stalagmites around the walls, a few out of the way
-  for (let i = 0; i < 9; i++) { const a = 0.5 + i * 0.6, r = 0.8 + 0.15 * cxNoise(i, 1, 2); const x = dc.x + dr.x * r * Math.sin(a + 1.2), z = dc.z + dr.z * r * Math.cos(a + 1.2); if (z < CX.ledgeZ + 2 || z > t.vz1 - 2) continue; const h = 0.6 + 1.2 * cxNoise(i, 4, 2); b.add(new THREE.ConeGeometry(0.22 + 0.1 * h, h, 5), '#5a5048', M4(new V3(x, CXF + h / 2, z))); }
+  // stalagmites around the walls, a few out of the way (never on the slick strip or the walk path)
+  for (let i = 0; i < 13; i++) { const a = 0.4 + i * 0.45, r = 0.82 + 0.12 * cxNoise(i, 1, 2); const x = dc.x + dr.x * r * Math.sin(a + 1.2), z = dc.z + dr.z * r * Math.cos(a + 1.2); if (z < CX.ledgeZ + 2.2 || z > t.vz1 - 2) continue; const h = 0.55 + 1.35 * cxNoise(i, 4, 2); b.add(new THREE.ConeGeometry(0.2 + 0.12 * h, h, 5), '#5a5048', M4(new V3(x, CXF + h / 2, z))); }
+  // stalactites hanging from the dome, kept above head height and off the ledge
+  for (let i = 0; i < 16; i++) {
+    const a = i * 0.41 + 0.15, r = 0.4 + 0.45 * cxNoise(i, 3, 8);
+    const x = dc.x + dr.x * r * Math.sin(a), z = dc.z + dr.z * r * Math.cos(a);
+    if (z < CX.ledgeZ + 2.4 || z > t.vz1 - 1.2) continue;
+    const h = 0.45 + 1.1 * cxNoise(i, 6, 8), rr0 = 0.1 + 0.08 * h;
+    const y1 = dc.y + dr.y * Math.sqrt(Math.max(0.15, 1 - r * r)) - 0.15, y0 = Math.max(y1 - h, CXF + 2.3);
+    if (y0 >= y1 - 0.2) continue;
+    b.add(new THREE.ConeGeometry(rr0, y1 - y0, 5), '#4a433c', M4(new V3(x, (y0 + y1) / 2, z), EUL(Math.PI, 0, 0)));
+  }
+  // a few ceiling drips in the arrival tunnel (high, so they never block walking)
+  for (let i = 0; i < 4; i++) {
+    const z = t.vz0 - 1.1 - i * 1.35, h = 0.18 + 0.12 * cxNoise(i, 9, 11);
+    b.add(new THREE.ConeGeometry(0.07, h, 5), '#3f3934', M4(new V3(t.x + (i % 2 ? 0.25 : -0.2), CXF + t.wallH + t.hw - h / 2 - 0.05, z), EUL(Math.PI, 0, 0)));
+  }
   // pillars rising out of the dark, tops level with the ledge
   for (const pc of CX.pillars) {
     const g = new THREE.CylinderGeometry(CX.PR, CX.PR * 1.4, 60, 9, 10, true).toNonIndexed(), p = g.attributes.position.array;
     for (let i = 0; i < p.length; i += 3) { const y = p[i + 1]; if (y < 29.9) { const a = Math.atan2(p[i + 2], p[i]), e = 1 + 0.12 * cxNoise(a * 2.5 + 3, y * 0.4, 21); p[i] *= e; p[i + 2] *= e; } }
-    b.add(g, '#5c544c', M4(new V3(pc.x, CXF - 30, pc.z)), 0.12);
+    b.add(g, '#5c544c', M4(new V3(pc.x, CXF - 30, pc.z)), 0.12, (x, y) => y < CXF - 22 ? '#3f3a34' : (cxNoise(x * 1.4, y * 0.25, 21) > 0.72 ? '#4a453e' : '#5c544c'));
     b.add(new THREE.CircleGeometry(CX.PR, 9).rotateX(-Math.PI / 2), '#b3a894', M4(new V3(pc.x, CXF + 0.004, pc.z)), 0.1);
     addCol('rock', p => { const dxz = Math.hypot(p.x - pc.x, p.z - pc.z) - CX.PR * (1 + 0.4 * clamp((CXF - p.y) / 60, 0, 1)), dy = Math.max(p.y - CXF, CXF - 60 - p.y); return Math.min(Math.max(dxz, dy), 0) + Math.hypot(Math.max(dxz, 0), Math.max(dy, 0)); }, new V3(pc.x, CXF - 30, pc.z), 31, true, { cave: 'pillar' }); // rock like any other: walk on the top, grab the sides and climb back up (radius follows the mesh's taper; no lip at the top edge)
   }
@@ -1717,14 +1872,24 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
   // ===== ledge chamber after the 3rd pillar + the 4 m side tunnel to the right (CXG.rt) =====
   const b = new CxB(5151), e = CX.end, x0 = e.c.x - e.h.x, x1 = e.c.x + e.h.x, z0 = CX.endEdge, z1 = e.c.z - e.h.z, yt = CXF + e.h.y * 2;
   const jit = (i, j, s) => 0.12 * cxNoise(i * 1.9, j * 2.1, s);
-  b.grid(6, 5, (i, j) => new V3(x0 + (x1 - x0) * i / 6, CXF, z0 + (z1 - z0) * j / 5), ROCK_F, 0.08);                              // floor
-  b.grid(6, 5, (i, j) => new V3(x0 + (x1 - x0) * i / 6, yt + jit(i, j, 1), z0 + (z1 - z0) * j / 5), ROCK_C, 0.12);             // ceiling
-  b.grid(6, 4, (i, j) => new V3(x0 + (x1 - x0) * i / 6, CXF + (yt - CXF) * j / 4, z1 - (j ? jit(i, j, 2) : 0)), ROCK_C, 0.12); // back wall
-  b.grid(5, 4, (i, j) => new V3(x0 - (j ? jit(i, j, 3) : 0), CXF + (yt - CXF) * j / 4, z0 + (z1 - z0) * i / 5), ROCK_C, 0.12); // left wall
+  b.grid(8, 6, (i, j) => new V3(x0 + (x1 - x0) * i / 8, CXF, z0 + (z1 - z0) * j / 6), ROCK_F, 0.08);                              // floor
+  b.grid(8, 6, (i, j) => new V3(x0 + (x1 - x0) * i / 8, yt + jit(i, j, 1), z0 + (z1 - z0) * j / 6), ROCK_C, 0.12);             // ceiling
+  b.grid(8, 5, (i, j) => new V3(x0 + (x1 - x0) * i / 8, CXF + (yt - CXF) * j / 5, z1 - (j ? jit(i, j, 2) : 0)), ROCK_C, 0.12); // back wall
+  b.grid(6, 5, (i, j) => new V3(x0 - (j ? jit(i, j, 3) : 0), CXF + (yt - CXF) * j / 5, z0 + (z1 - z0) * i / 6), ROCK_C, 0.12); // left wall
   archPortal(b, -CX.rt.z, CXF, z0 - z1, yt - CXF, CX.rt, (u, v) => new V3(x1, v, -u));                                            // right wall with the tunnel
-  b.grid(8, 6, (i, j) => new V3(-3.6 + 13.2 * i / 8, CXF - 30 * (j / 6) ** 1.5, CX.endEdge + (j ? 0.25 * cxNoise(i * 2.1, j, 4) : 0)), ROCK_C, 0.1); // ledge face below
+  b.grid(10, 8, (i, j) => new V3(-3.6 + 13.2 * i / 10, CXF - 30 * (j / 8) ** 1.5, CX.endEdge + (j ? 0.3 * cxNoise(i * 2.1, j, 4) : 0)), ROCK_C, 0.1); // ledge face below
   b.grid(8, 3, (i, j) => new V3(-3.6 + 13.2 * i / 8, CXF + 7 * j / 3, CX.endEdge - 0.05), ROCK_C, 0.12, null, (i, j) => j < 2 && i >= 3 && i < 5); // rock around the chamber opening
-  archTube(b, CX.rt, true, CX.rt.vx0 - 0.01, CX.rt.vx1, 5);
+  archTube(b, CX.rt, true, CX.rt.vx0 - 0.01, CX.rt.vx1, 6);
+  // stalactites along the chamber sides and a couple in the exit tunnel — clear of the landing and the vine later
+  for (let i = 0; i < 8; i++) {
+    const x = i < 4 ? x0 + 0.45 + 0.35 * (i % 2) : x1 - 0.45 - 0.35 * (i % 2);
+    const z = z0 + 0.8 + (z1 - z0 - 1.4) * ((i % 4) + 0.3) / 4, h = 0.35 + 0.5 * cxNoise(i, 7, 15);
+    b.add(new THREE.ConeGeometry(0.1 + 0.05 * h, h, 5), '#4a433c', M4(new V3(x, yt - h / 2 - 0.05, z), EUL(Math.PI, 0, 0)));
+  }
+  for (let i = 0; i < 3; i++) {
+    const x = CX.rt.vx0 + 0.8 + i * 1.0, h = 0.2 + 0.12 * cxNoise(i, 8, 17);
+    b.add(new THREE.ConeGeometry(0.07, h, 5), '#3f3934', M4(new V3(x, CXF + CX.rt.wallH + CX.rt.hw - h / 2 - 0.05, CX.rt.z + (i % 2 ? 0.2 : -0.18)), EUL(Math.PI, 0, 0)));
+  }
   const m = new THREE.Mesh(b.build(), cxMatIn); CXG.rt.add(m);
   // pitch-black shell around the chasm + chamber: looking into the void from anywhere (cave, tunnel, cliff mouth) shows black, never sky
   const vb = new CxB(1), X0 = CX.chasm.c.x - CX.chasm.h.x - 0.1, X1 = CX.chasm.c.x + CX.chasm.h.x + 0.1, Y0 = CXF - 61, Y1 = CXF + 7.2, Z0 = CX.ledgeZ, Z1 = z1 - 0.7;
@@ -1743,14 +1908,19 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
 {
   // ===== outside: the cliff (very tall), ledges, overhang + vine, ocean far below (CXG.out) =====
   const b = new CxB(6161), FZ = CX.faceZ, FX = CX.faceX, TOP = 230, BOT = CX.ocean - 5;
-  const ys = []; for (let i = 18; i >= 1; i--) ys.push(CXF - (CXF - BOT) * (i / 18) ** 2); ys.push(CXF - 0.2); for (let i = 0; i <= 14; i++) ys.push(CXF + 2.7 + (TOP - CXF - 2.7) * (i / 14) ** 2);
-  const cliffCol = (x, y) => y < CX.ocean + 25 ? '#8a8378' : y > CXF + 120 ? '#c9c4bb' : CLIFF;
+  const ys = []; for (let i = 24; i >= 1; i--) ys.push(CXF - (CXF - BOT) * (i / 24) ** 2); ys.push(CXF - 0.2); for (let i = 0; i <= 18; i++) ys.push(CXF + 2.7 + (TOP - CXF - 2.7) * (i / 18) ** 2);
+  const cliffCol = (x, y) => {
+    if (y < CX.ocean + 25) return '#8a8378';
+    if (y > CXF + 120) return '#c9c4bb';
+    const band = Math.sin(y * 0.07 + 0.45 * cxNoise((x || 0) * 0.04, y * 0.04, 41));
+    return band > 0.6 ? '#8a8278' : band < -0.55 ? '#6a655c' : CLIFF;
+  };
   // face A: runs off to the LEFT of the exit (along +x), the rock mass is behind it (-z)
-  const xs = []; for (let j = 0; j <= 44; j++) xs.push(FX + 1300 * (j / 44) ** 2.3);
+  const xs = []; for (let j = 0; j <= 56; j++) xs.push(FX + 1300 * (j / 56) ** 2.3);
   const ampA = (x, y) => Math.min(1, (x - FX) / 3) * Math.min(26, 0.3 + 0.06 * Math.max(0, Math.hypot(x - 18, (y - CXF) * 0.8) - 10));
   b.grid(xs.length - 1, ys.length - 1, (j, i) => { const x = xs[j], y = ys[i]; return new V3(x, y, FZ - 0.00008 * (x - FX) ** 2 - ampA(x, y) * cxFbm(x, y, 31)); }, CLIFF, 0.1, cliffCol);
   // face B: the mountain side you come out of (x = 10), with the cave mouth in it; extends to your right/behind
-  const zs = [FZ, FZ + 1, FZ + 2, FZ + 3]; for (let j = 1; j <= 30; j++) zs.push(FZ + 3 + 330 * (j / 30) ** 2.2);
+  const zs = [FZ, FZ + 1, FZ + 2, FZ + 3]; for (let j = 1; j <= 40; j++) zs.push(FZ + 3 + 330 * (j / 40) ** 2.2);
   const iMouth = ys.indexOf(CXF - 0.2);
   const ampB = (z, y) => Math.min(1, (z - FZ) / 3) * Math.min(26, 0.25 + 0.06 * Math.max(0, Math.hypot(z - CX.rt.z, y - CXF) - 6));
   b.grid(zs.length - 1, ys.length - 1, (j, i) => { const z = zs[j], y = ys[i]; return new V3(FX - 0.00008 * (z - FZ) ** 2 - ampB(z, y) * cxFbm(z + 500, y, 37), y, z); }, CLIFF, 0.1, cliffCol, (j, i) => j < 3 && i === iMouth);
@@ -1760,6 +1930,20 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
   slab(CX.lip.c, CX.lip.h, '#9d968b');
   for (const l of CX.ledges) slab(l.c, l.h, l.long ? '#a49c90' : '#aaa296');
   b.add(new THREE.DodecahedronGeometry(1, 0), '#9a9387', M4(CX.overhang.c, null, CX.overhang.h.clone().multiplyScalar(1.15)), 0.1);
+  // embedded boulders and shallow shelves on the cliff, kept clear of the lip, ledges, jump path and vine
+  for (let i = 0; i < 18; i++) {
+    const u = cxNoise(i, 1, 61), v = cxNoise(i, 2, 61);
+    const x = FX + 10 + 90 * u, y = BOT + 8 + (TOP - BOT - 16) * v;
+    if (x < 32 && y > CXF - 8 && y < CXF + 14) continue; // gameplay band
+    const s = 1.3 + 2.4 * cxNoise(i, 3, 61);
+    const z = FZ - 0.00008 * (x - FX) ** 2 - ampA(x, y) * cxFbm(x, y, 31) + 0.35;
+    b.add(new THREE.DodecahedronGeometry(1, 0), i % 3 ? '#8a8378' : '#756f66', M4(new V3(x, y, z), null, new V3(s, s * 0.7, s * 0.85)), 0.12);
+  }
+  for (let i = 0; i < 6; i++) {
+    const x = FX + 36 + i * 14, y = CXF - 18 - (i % 3) * 16;
+    const z = FZ - 0.00008 * (x - FX) ** 2 - ampA(x, y) * cxFbm(x, y, 31) + 0.2;
+    b.add(new THREE.BoxGeometry(1, 1, 1), '#7a746c', M4(new V3(x, y, z), null, new V3(5.5 + i, 0.45, 1.6)), 0.06);
+  }
   for (const bx of [CX.lip, ...CX.ledges, CX.overhang]) addCol('rock', p => sdBox(p, bx.c, bx.h), bx.c, bx.h.length() + 0.1, true, { cave: 'ledge' });
   const m = new THREE.Mesh(b.build(), cxMat); CXG.out.add(m); CX.outTris = m.geometry.attributes.position.count / 3;
   const ocean = new THREE.Mesh(new THREE.PlaneGeometry(16000, 16000, 1, 1).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x2c74b2, emissive: 0x0b2c48 }));
@@ -1769,19 +1953,27 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
 // so every sightline into the opening, from any angle or distance, ends on black. Its back face plugs the tunnel only while the tunnel is culled.
 const CAVE2_DARK = (() => {
   const k = CAVES[1], back = k.c.z - k.h.z, front = -HALF, e = 0.012;
-  const g = new THREE.BoxGeometry(k.h.x * 2 - 2 * e, k.h.y * 2 - 2 * e, front - back + 0.05);
-  const lin = new THREE.MeshBasicMaterial({ color: 0x050506, fog: false, side: THREE.BackSide });
-  const plug = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false, side: THREE.BackSide });
-  const none = new THREE.MeshBasicMaterial({ visible: false });
-  g.clearGroups(); g.addGroup(0, 24, 0); g.addGroup(24, 6, 1); g.addGroup(30, 6, 2); // box faces: +x -x +y -y (one draw), +z = open front, -z = back plug
-  const m = new THREE.Mesh(g, [lin, none, plug]);
-  m.position.set(k.c.x, k.floor + k.h.y, (front + back - 0.05) / 2); m.renderOrder = -1; scene.add(m);
-  // black collar just behind the wall face: the rock tiles around the opening leave gaps (seen from the side); behind them is open sky
-  const W = k.h.x + 2.6, H0 = 1.8, H1 = k.h.y * 2 + 2.4, sh = new THREE.Shape(); sh.moveTo(-W, -H0); sh.lineTo(W, -H0); sh.lineTo(W, H1); sh.lineTo(-W, H1); sh.lineTo(-W, -H0);
-  const hole = new THREE.Path(); hole.moveTo(-k.h.x, 0); hole.lineTo(-k.h.x, k.h.y * 2); hole.lineTo(k.h.x, k.h.y * 2); hole.lineTo(k.h.x, 0); hole.lineTo(-k.h.x, 0); sh.holes.push(hole);
-  const collar = new THREE.Mesh(new THREE.ShapeGeometry(sh), new THREE.MeshBasicMaterial({ color: 0x000000, fog: false, side: THREE.DoubleSide }));
-  collar.position.set(k.c.x, k.floor, front - 0.05); scene.add(collar);
-  return { mesh: m, plug, collar };
+  const lin = new THREE.MeshBasicMaterial({ color: 0x050506, fog: false, side: THREE.DoubleSide });
+  const plugMat = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false, side: THREE.DoubleSide });
+  const pack = (...geos) => { // one mesh / one draw for the lining, floor and collar
+    const pos = [];
+    for (const g of geos) { const gg = g.index ? g.toNonIndexed() : g, a = gg.attributes.position.array; for (const v of a) pos.push(v); if (gg !== g) gg.dispose(); g.dispose(); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.computeVertexNormals(); return g;
+  };
+  const tube = makeArchTubeGeo(front + 0.32, back - 0.01, 6, e); // lining reaches the front of the stone frame so the soffit reads black from every angle
+  tube.applyMatrix4(new THREE.Matrix4().makeTranslation(k.c.x, k.floor, 0));
+  const floor = new THREE.PlaneGeometry(CAVE_ARCH.hw * 2 - 2 * e, (front - back) - 0.03).rotateX(-Math.PI / 2);
+  floor.applyMatrix4(new THREE.Matrix4().makeTranslation(k.c.x, k.floor + e, (front + back) / 2));
+  const W = CAVE_ARCH.hw + 2.6, H0 = 1.8, H1 = CAVE_ARCH.wallH + CAVE_ARCH.hw + 2.4, sh = new THREE.Shape();
+  sh.moveTo(-W, -H0); sh.lineTo(W, -H0); sh.lineTo(W, H1); sh.lineTo(-W, H1); sh.lineTo(-W, -H0);
+  const hole = new THREE.Path(), pr = caveArchProf(14);
+  hole.moveTo(pr[0][0], pr[0][1]); for (const [u, v] of pr.slice(1)) hole.lineTo(u, v); hole.closePath(); sh.holes.push(hole);
+  const collarG = new THREE.ShapeGeometry(sh);
+  collarG.applyMatrix4(new THREE.Matrix4().makeTranslation(k.c.x, k.floor, front - 0.05));
+  const m = new THREE.Mesh(pack(tube, floor, collarG), lin); m.renderOrder = -1; scene.add(m);
+  const plugMesh = new THREE.Mesh(makeArchCapGeo(14, e), plugMat);
+  plugMesh.position.set(k.c.x, k.floor, back); plugMesh.renderOrder = -1; scene.add(plugMesh);
+  return { mesh: m, plug: plugMesh, collar: m, plugMat };
 })();
 // zone fog: jungle -> dim tunnel -> dark cave -> pitch-black chasm (each pillar barely visible from the one before) -> daylight cliff
 const FOG_CAVE = new C3('#07080b'), FOG_CHASM = new C3('#000000'), _fc = new C3();
@@ -1817,6 +2009,7 @@ function updateCave(h) {
 }
 MM.CX = CX; MM.CXG = CXG; MM.CX_STATE = CX_STATE; MM.JUMP = JUMP; MM.cxInterior = p => cxInterior(new V3(...p)); MM.gorillaGeo = gorillaGeo; MM.GRIP = () => GRIP_BITS;
 MM.CAVE2_DARK = CAVE2_DARK; MM.fogInfo = () => ({ near: scene.fog.near, far: scene.fog.far, color: scene.fog.color.getHexString(), zone: CX_STATE.zone });
+MM.CAVE_ARCH = CAVE_ARCH; MM.sdCaveArch = (p, i) => sdCaveArch(new V3(...p), CAVES[i]);
 
 // ---------- DEBUG overlay (test build only) ----------
 // Off by default. ?debug=1 / ?debug=0 force it on / off (and are remembered); otherwise the last choice is remembered in localStorage ('mmcave_debug').
@@ -1832,8 +2025,8 @@ function dbgArea(h) {
   if (z === 'chasm') { if (y < F - 0.5) return 'chasm (falling)'; for (let i = 0; i < CX.pillars.length; i++) { const q = CX.pillars[i]; if (Math.hypot(x - q.x, h.z - q.z) < CX.PR + 0.25) return 'pillar ' + (i + 1); } return 'chasm'; }
   if (z === 'sidetunnel') return 'side tunnel';
   if (z === 'out') return PH.hands.some(q => q.vine) ? 'cliff vine' : y < F - 5 ? 'cliff (falling)' : x < 12 ? 'cliff lip' : y > F + 3 ? 'cliff long ledge' : 'cliff ledges';
-  if (sdBox(h, CAVES[0].c, CAVES[0].h) < 0.3) return 'shop cave';
-  if (sdBox(h, CAVES[1].c, CAVES[1].h) < 0.3) return 'wall cave';
+  if (sdCaveArch(h, CAVES[0]) < 0.3) return 'shop cave';
+  if (sdCaveArch(h, CAVES[1]) < 0.3) return 'wall cave';
   return Math.hypot(x, h.z) < 8 ? 'spawn' : 'jungle';
 }
 const dbgFmtN = n => n >= 1e4 ? (n / 1e3).toFixed(1) + 'k' : String(n);
