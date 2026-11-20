@@ -32,6 +32,14 @@ const HELPERS = () => {
   const ctx = await b.newContext({ viewport: vp }); const p = await ctx.newPage(); const errs = [];
   p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); }); p.on('pageerror', e => errs.push('PAGEERROR ' + e.message));
   await p.goto(URL); await p.waitForFunction(() => !!window.MM, null, { timeout: 30000 }); await p.evaluate(HELPERS);
+  await p.waitForFunction(() => window.MM && MM.MTX && MM.MTX.lines && MM.MTX.lines.length > 3, null, { timeout: 8000 });
+  const start = await p.evaluate(() => {
+    const hero = document.querySelector('.testHero'), cs = hero && getComputedStyle(hero), cv = document.getElementById('matrix'), land = document.getElementById('landing');
+    return { text: hero && hero.textContent.trim(), fontPx: hero && parseFloat(cs.fontSize), matrix: !!(cv && cv.width > 100), lines: (MM.MTX && MM.MTX.lines) || [], landing: land && !land.classList.contains('hidden'), sub: document.querySelector('.sub').textContent, build: MM.DBG_BUILD };
+  });
+  await p.screenshot({ path: SHOTS + 'cave_start_matrix.png' });
+  ok(start.landing && start.text === 'TEST' && start.fontPx >= 90, 'start screen: the word TEST is huge and prominent (' + start.fontPx + ' px) ' + JSON.stringify({ text: start.text, fontPx: start.fontPx }));
+  ok(start.matrix && start.lines.some(l => /DEBUG/.test(l) && /cave-test/.test(l)) && start.lines.some(l => /FPS|draw calls|area:/.test(l)), 'start screen: matrix rain canvas with a live debug readout (build, FPS, renderer, area) ' + JSON.stringify(start.lines));
   ok(await p.evaluate(() => document.title.includes('CAVE TEST') && document.querySelector('.sub').textContent.includes('CAVE TEST') && MM.APPID === 'optimusgrok-monkey-mayhem-cavetest-v1'), 'test build: own title/banner and its own multiplayer namespace (appId ' + await p.evaluate(() => MM.APPID) + ')');
   await p.evaluate(() => { document.getElementById('roomIn').value = 'CAVE' + Math.random().toString(36).slice(2, 6); document.getElementById('voiceIn').checked = false; });
   await p.click('#playDesk'); await p.waitForTimeout(600);
@@ -41,10 +49,10 @@ const HELPERS = () => {
   const ch = await p.evaluate(() => {
     const r = {}, J = MM.JUMP; r.curve = [0, 0.5, 0.9, 1].map(c => { const s = J.speed(c); return [c, +s.h.toFixed(2), +s.u.toFixed(2)]; });
     C.stand(0, 4, 0, MM.terrainH(0, 4)); const y0 = C.head().y; MM.fake.a = true;
-    const samp = []; C.run(2.97, t => { if ([0.5, 1.5, 2.5, 2.95].some(s => Math.abs(t - s) < 0.007)) { const h = MM.handsW(); samp.push({ t: +t.toFixed(2), c: +J.c.toFixed(3), sink: +(y0 - C.head().y).toFixed(3), handY: +((h[0][1] + h[1][1]) / 2 - MM.terrainH(0, 3.6)).toFixed(3), hand0: h[0] }); } });
+    const samp = []; C.run(1.97, t => { if ([0.5, 1.0, 1.5, 1.95].some(s => Math.abs(t - s) < 0.007)) { const h = MM.handsW(); samp.push({ t: +t.toFixed(2), c: +J.c.toFixed(3), sink: +(y0 - C.head().y).toFixed(3), handY: +((h[0][1] + h[1][1]) / 2 - MM.terrainH(0, 3.6)).toFixed(3), hand0: h[0] }); } });
     r.samp = samp; r.planted = Math.hypot(samp[1].hand0[0] - samp[3].hand0[0], samp[1].hand0[2] - samp[3].hand0[2]) < 0.02;
     r.vel0 = MM.PH.V.length();
-    const n0 = J.count; let tl = 0; while (J.count === n0 && tl < 0.2) { MM.step(1 / 72); tl += 1 / 72; } r.autoT = +(2.97 + tl).toFixed(3); r.autoHeld = MM.fake.a; // A still held: launches by itself at 3 s
+    const n0 = J.count; let tl = 0; while (J.count === n0 && tl < 0.2) { MM.step(1 / 72); tl += 1 / 72; } r.autoT = +(1.97 + tl).toFixed(3); r.autoHeld = MM.fake.a; // A still held: launches by itself at 2 s
     const h0 = MM.handsW(), hy0 = C.head().y; r.launch = { c: J.last.c, h: J.last.h, u: J.last.u, vy: MM.PH.V.y, auto: J.last.auto };
     MM.step(1 / 72, 7); const h1 = MM.handsW(); r.push = { headUp: C.head().y - hy0, handMoved: Math.hypot(h1[0][0] - h0[0][0], h1[0][1] - h0[0][1], h1[0][2] - h0[0][2]) };
     const l = C.land(); r.land = l; r.jumpDist = Math.hypot(l.x - 0, l.z - 4);
@@ -54,8 +62,8 @@ const HELPERS = () => {
     return r;
   });
   console.log('INFO charge samples', JSON.stringify(ch.samp.map(s => ({ t: s.t, c: s.c, sink: s.sink, handY: s.handY }))));
-  ok(ch.samp[0].c > 0.15 && ch.samp[0].c < 0.18 && Math.abs(ch.samp[1].c - 0.5) < 0.01 && Math.abs(ch.samp[2].c - 0.833) < 0.01 && ch.samp[3].c > 0.97, `holding A charges linearly in seconds (c ${ch.samp.map(s => s.c).join(' / ')} at ${ch.samp.map(s => s.t).join(' / ')} s)`);
-  ok(ch.autoHeld && ch.launch.auto && ch.launch.c === 1 && Math.abs(ch.autoT - 3.0) < 0.03, `full charge jumps BY ITSELF at 3 s while A is still held (launched at ${ch.autoT} s, c ${ch.launch.c})`);
+  ok(ch.samp[0].c > 0.24 && ch.samp[0].c < 0.26 && Math.abs(ch.samp[1].c - 0.5) < 0.01 && Math.abs(ch.samp[2].c - 0.75) < 0.01 && ch.samp[3].c > 0.97, `holding A charges linearly in seconds (c ${ch.samp.map(s => s.c).join(' / ')} at ${ch.samp.map(s => s.t).join(' / ')} s)`);
+  ok(ch.autoHeld && ch.launch.auto && ch.launch.c === 1 && Math.abs(ch.autoT - 2.0) < 0.03, `full charge jumps BY ITSELF at 2 s while A is still held (launched at ${ch.autoT} s, c ${ch.launch.c})`);
   ok(ch.heldAfter.charging === false && ch.heldAfter.count === 1 && ch.recharge.charging && ch.recharge.c > 0.1, 'after the auto-jump, keeping A held does not start a new charge; release and press again charges ' + JSON.stringify([ch.heldAfter, ch.recharge]));
   ok(ch.curve[0][1] < 1.5 && ch.curve[3][1] > 4 && ch.curve[2][1] / ch.curve[3][1] < 0.88, 'launch speed curve: small hop on a tap, steepest near full charge ' + JSON.stringify(ch.curve));
   ok(ch.samp[3].sink > 0.27 && ch.samp[3].sink < 0.33 && ch.samp[0].sink < ch.samp[1].sink && ch.samp[1].sink < ch.samp[3].sink, `camera sinks slowly while charging (${ch.samp.map(s => s.sink).join(' → ')} m)`);
@@ -64,20 +72,20 @@ const HELPERS = () => {
   ok(!ch.land.spawned && ch.jumpDist > 3.5 && ch.tapDist < 0.9, `works anywhere: full jump in the jungle travels ${ch.jumpDist.toFixed(2)} m, a tap is a ${ch.tapDist.toFixed(2)} m hop`);
   // ---------- 2. pillar gaps ----------
   const gaps = await p.evaluate(() => {
-    const r = { full: [], short: [] }, CX = MM.CX, edges = [CX.ledgeZ, ...CX.pillars.map(pc => pc.z - CX.PR)], targets = [...CX.pillars.map(pc => pc.z + CX.PR), CX.endEdge];
-    edges.forEach((ez, i) => { C.stand(3, ez, 0); C.jump(3.1); const l = C.land(); r.full.push({ from: ez, ok: !l.spawned && l.z < targets[i] - 0.05 && Math.abs(l.y - (CX.F + 0.9)) < 0.1, z: l.z && +l.z.toFixed(2) }); });
-    for (const hold of [2.8, 2.6, 2.0]) { C.stand(3, CX.ledgeZ, 0); C.jump(hold); const l = C.land(); r.short.push({ hold, c: +MM.JUMP.last.c.toFixed(3), spawned: l.spawned }); }
-    C.stand(3, CX.pillars[0].z - CX.PR, 0); C.jump(2.75); const l = C.land(); r.short.push({ from: 'pillar1', hold: 2.75, spawned: l.spawned });
+    const r = { full: [], short: [] }, CX = MM.CX, mainP = CX.pillars.slice(0, 3), edges = [CX.ledgeZ, ...mainP.map(pc => pc.z - CX.PR)], targets = [...mainP.map(pc => pc.z + CX.PR), CX.endEdge];
+    edges.forEach((ez, i) => { C.stand(3, ez, 0); C.jump(2.1); const l = C.land(); r.full.push({ from: ez, ok: !l.spawned && l.z < targets[i] - 0.05 && Math.abs(l.y - (CX.F + 0.9)) < 0.1, z: l.z && +l.z.toFixed(2) }); });
+    for (const hold of [1.85, 1.7, 1.3]) { C.stand(3, CX.ledgeZ, 0); C.jump(hold); const l = C.land(); r.short.push({ hold, c: +MM.JUMP.last.c.toFixed(3), spawned: l.spawned }); }
+    C.stand(3, CX.pillars[0].z - CX.PR, 0); C.jump(1.8); const l = C.land(); r.short.push({ from: 'pillar1', hold: 1.8, spawned: l.spawned });
     // full traversal without teleporting: ledge -> 3 pillars -> ledge, small hops to reach each far edge
     C.stand(3, CX.ledgeZ, 0); const s0 = C.spawns(); r.chain = [];
     for (let i = 0; i < 4; i++) {
-      C.jump(3.1); let l = C.land(); r.chain.push(l.spawned ? 'fell' : +l.z.toFixed(2)); if (l.spawned) break;
-      if (i < 3) { const far = CX.pillars[i].z - CX.PR; let hops = 0; while (C.head().z - far > 0.45 && hops < 8) { C.jump(C.head().z - far > 1.0 ? 1.59 : 0.1); l = C.land(); hops++; if (l.spawned) break; } r.chain.push('hops' + hops + '@' + (C.head().z - far).toFixed(2)); }
+      C.jump(2.1); let l = C.land(); r.chain.push(l.spawned ? 'fell' : +l.z.toFixed(2)); if (l.spawned) break;
+      if (i < 3) { const far = CX.pillars[i].z - CX.PR; let hops = 0; while (C.head().z - far > 0.45 && hops < 8) { C.jump(C.head().z - far > 1.0 ? 1.06 : 0.1); l = C.land(); hops++; if (l.spawned) break; } r.chain.push('hops' + hops + '@' + (C.head().z - far).toFixed(2)); }
     }
     r.chainOk = C.spawns() === s0 && C.head().z < CX.endEdge;
     return r;
   });
-  ok(gaps.full.every(g => g.ok), 'a full 3 s charge from the very edge clears every gap (ledge → pillar 1 → 2 → 3 → far ledge): ' + JSON.stringify(gaps.full.map(g => g.z)));
+  ok(gaps.full.every(g => g.ok), 'a full 2 s charge from the very edge clears every gap (ledge → pillar 1 → 2 → 3 → far ledge): ' + JSON.stringify(gaps.full.map(g => g.z)));
   ok(gaps.short.every(g => g.spawned), 'any lesser charge falls short into the dark: ' + JSON.stringify(gaps.short));
   ok(gaps.chainOk, 'whole crossing in one go, small hops to each far edge: ' + JSON.stringify(gaps.chain));
   // ---------- 2b. charged jump on a real headset: head bob / drift, the real WebXR input path (xr-standard right controller, button 4) ----------
@@ -85,7 +93,7 @@ const HELPERS = () => {
     const r = { bob: [] }, CX = MM.CX, F = CX.F, J = MM.JUMP, T = MM.THREE;
     for (const [amp, freq, drift] of [[0.005, 1.5, 0], [0.012, 2.2, 0], [0, 0, 0.03], [0.02, 0.7, -0.05]]) { // real heads never hold still
       C.stand(3, CX.ledgeZ, 0); MM.fake.a = true; let maxC = 0, drops = 0, prevT = 0;
-      C.run(3.4, t => { MM.fake.head = [0, 1.6 + amp * Math.sin(t * freq * 6.283) + drift * t / 3, 0]; if (J.charging) { if (J.t < prevT - 0.05) drops++; prevT = J.t; } maxC = Math.max(maxC, J.c); });
+      C.run(2.3, t => { MM.fake.head = [0, 1.6 + amp * Math.sin(t * freq * 6.283) + drift * t / 2, 0]; if (J.charging) { if (J.t < prevT - 0.05) drops++; prevT = J.t; } maxC = Math.max(maxC, J.c); });
       MM.fake.a = false; MM.fake.head = [0, 1.6, 0]; const l = C.land(); r.bob.push({ amp, drift, maxC: +maxC.toFixed(2), drops, c: J.last.c, landZ: l.z && +l.z.toFixed(2), spawned: l.spawned });
     }
     // scripted XRFrame + inputSources: readVR() is the code that runs on the Quest
@@ -98,20 +106,20 @@ const HELPERS = () => {
     const A = on => { R.gamepad.buttons[4].pressed = on; R.gamepad.buttons[4].value = on ? 1 : 0; };
     const xrStand = (x, z, yaw = 0, pitch = 0, y) => { MM.fake = null; MM.xrSim = xr; S.headQ = C.q(yaw, pitch); S.head = [0, 1.6, 0]; MM.place(x, (y ?? F) + 1.3, z); C.run(0.8); };
     const xrLand = () => { let t = 0, s0 = C.spawns(), still = 0; while (t < 4) { MM.step(1 / 72); t += 1 / 72; if (C.spawns() > s0) return { spawned: true }; if (MM.PH.grounded && MM.PH.V.length() < 0.05) { if (++still > 20) break; } else still = 0; } const h = C.head(); return { spawned: false, x: h.x, y: h.y, z: h.z }; };
-    xrStand(3, CX.ledgeZ); A(true); const n0 = J.count; let tAuto = -1; C.run(3.3, t => { S.head = [0, 1.6 + 0.006 * Math.sin(t * 9), 0]; if (tAuto < 0 && J.count > n0) tAuto = t; }); r.xrA = MM.JUMP.held; A(false);
+    xrStand(3, CX.ledgeZ); A(true); const n0 = J.count; let tAuto = -1; C.run(2.3, t => { S.head = [0, 1.6 + 0.006 * Math.sin(t * 9), 0]; if (tAuto < 0 && J.count > n0) tAuto = t; }); r.xrA = MM.JUMP.held; A(false);
     r.xrFull = { tAuto: +tAuto.toFixed(2), c: J.last.c, auto: J.last.auto, land: xrLand() };
-    xrStand(3, CX.ledgeZ); A(true); C.run(2.0); A(false); r.xrPartial = { c: +J.last.c.toFixed(2), land: xrLand() };
+    xrStand(3, CX.ledgeZ); A(true); C.run(1.3); A(false); r.xrPartial = { c: +J.last.c.toFixed(2), land: xrLand() };
     // distance grows with the hold (jungle, flat ground in front of spawn)
     r.dist = [];
-    for (const hold of [0.5, 1.5, 2.2, 2.7, 3.2]) { const z0 = 8; xrStand(0, z0, 0, 0, MM.terrainH(0, z0)); A(true); C.run(hold); A(false); const l = xrLand(); r.dist.push({ hold, c: +J.last.c.toFixed(2), d: l.spawned ? null : +Math.hypot(l.x, l.z - z0).toFixed(2) }); }
+    for (const hold of [0.5, 1.05, 1.4, 1.7, 2.05]) { const z0 = 8; xrStand(0, z0, 0, 0, MM.terrainH(0, z0)); A(true); C.run(hold); A(false); const l = xrLand(); r.dist.push({ hold, c: +J.last.c.toFixed(2), d: l.spawned ? null : +Math.hypot(l.x, l.z - z0).toFixed(2) }); }
     // forward = where the head looks (yaw), even looking steeply down at the edge
     xrStand(-6, 6, Math.PI / 2, -1.0, MM.terrainH(-6, 6)); A(true); C.run(1.2); A(false); C.run(0.05); r.dir = J.last.dir.map(v => +v.toFixed(2));
     MM.xrSim = null; C.idle(0);
     return r;
   });
   ok(hs.bob.every(b => b.maxC === 1 && b.drops === 0 && !b.spawned && b.landZ < -52.3), 'head bob / slow drift while holding A (a real headset) no longer resets the charge: full charge every time and lands on pillar 1 ' + JSON.stringify(hs.bob));
-  ok(hs.xrFull.c === 1 && hs.xrFull.auto && Math.abs(hs.xrFull.tAuto - 3.0) < 0.05 && !hs.xrFull.land.spawned && hs.xrFull.land.z < -52.5, `real WebXR input path (xr-standard right controller, buttons[4] = A, scripted XRFrame): 3 s hold from the ledge edge auto-launches at ${hs.xrFull.tAuto} s and lands ${(-48 - 4 - hs.xrFull.land.z).toFixed(2)} m onto pillar 1`);
-  ok(hs.xrPartial.land.spawned, `same path, a 2 s hold (c ${hs.xrPartial.c}) falls short into the chasm`);
+  ok(hs.xrFull.c === 1 && hs.xrFull.auto && Math.abs(hs.xrFull.tAuto - 2.0) < 0.05 && !hs.xrFull.land.spawned && hs.xrFull.land.z < -52.5, `real WebXR input path (xr-standard right controller, buttons[4] = A, scripted XRFrame): 2 s hold from the ledge edge auto-launches at ${hs.xrFull.tAuto} s and lands ${(-48 - 4 - hs.xrFull.land.z).toFixed(2)} m onto pillar 1`);
+  ok(hs.xrPartial.land.spawned, `same path, a 1.3 s hold (c ${hs.xrPartial.c}) falls short into the chasm`);
   ok(hs.dist.every((d, i) => d.d != null && (i === 0 || d.d > hs.dist[i - 1].d + 0.1)) && hs.dist[4].d - hs.dist[3].d > 1, 'each longer hold jumps clearly further: ' + JSON.stringify(hs.dist));
   ok(Math.abs(hs.dir[0] + 1) < 0.02 && Math.abs(hs.dir[1]) < 0.02, 'jump direction = where the head looks (yaw), also while looking steeply down: ' + JSON.stringify(hs.dir));
   // ---------- 2c. while charging only the two planted arms show (no extra arm on the controller holding A) ----------
@@ -155,7 +163,7 @@ const HELPERS = () => {
     // no collider anywhere in the chasm (away from pillars and walls) or in the cliff air
     let n = 0, hits = 0; const v = new T.Vector3();
     for (let x = -3.0; x <= 9.0; x += 0.3) for (let z = CX.ledgeZ - 0.45; z >= CX.endEdge + 0.5; z -= 0.3) for (let y = F - 2; y <= F + 2.5; y += 0.3) { if (CX.pillars.some(pc => Math.hypot(x - pc.x, z - pc.z) < CX.PR + 0.45)) continue; v.set(x, y, z); n++; if (MM.nearest(v).d < 0.4) hits++; }
-    for (let x = 11.5; x <= 40; x += 0.7) for (let z = CX.faceZ + 0.6; z <= -50.5; z += 0.7) for (let y = F - 6; y <= F + 8; y += 0.7) { if ([...CX.ledges, CX.lip, CX.overhang].some(b => Math.abs(x - b.c.x) < b.h.x + 0.5 && Math.abs(y - b.c.y) < b.h.y + 0.5 && Math.abs(z - b.c.z) < b.h.z + 0.5)) continue; v.set(x, y, z); n++; if (MM.nearest(v).d < 0.4) hits++; }
+    for (let x = 11.5; x <= 40; x += 0.7) for (let z = CX.faceZ + 0.6; z <= -50.5; z += 0.7) for (let y = F - 6; y <= F + 8; y += 0.7) { if (z > -53 && (x > MM.HALF - 2 || y > 10)) continue; /* wall 2 / east face, and the clearing tree line, now occupy the NE rim of this volume */ if ([...CX.ledges, CX.lip, CX.overhang].some(b => Math.abs(x - b.c.x) < b.h.x + 0.5 && Math.abs(y - b.c.y) < b.h.y + 0.5 && Math.abs(z - b.c.z) < b.h.z + 0.5)) continue; v.set(x, y, z); n++; if (MM.nearest(v).d < 0.4) hits++; }
     r.scan = { n, hits }; C.idle(0); return r;
   });
   ok(walk.walks.every(w => w.spawned && w.fallTimer && w.fallFor >= 1.99 && w.fallFor < 2.7 && w.worstHeld < 0.35), 'walking off the ledge (head moving room-scale; hands hanging, dragging on the slick strip or swinging; centre, sides, diagonal) or off each pillar (hands off the rock; pillar tops now grip like any rock): nothing holds you up, you fall and respawn 2 s after your last footing (a hand sliding off the edge can add a moment) ' + JSON.stringify(walk.walks.map(w => [w.x, w.z0, w.handY, w.swing, w.spawned ? w.t : w.at, w.worstHeld, w.fallFor, w.fallTimer])));
@@ -202,7 +210,7 @@ const HELPERS = () => {
   const armOk = m => m && m.moved > 1.5 && m.anch > 20;
   ok(armOk(arm.ground) && armOk(arm.cave), `real WebXR input path: both controllers pushing back on the ground move you forward (jungle ${arm.ground.moved} m, big cave ${arm.cave.moved} m in 2 s of strokes)`);
   ok(arm.wall.moved > 0.5 && arm.wall.anch > 10, `real WebXR input path: one controller pushing along the tunnel wall moves you (${arm.wall.moved} m)`);
-  ok(arm.jumped === 1 && arm.autoJumped && armOk(arm.afterJump) && armOk(arm.afterAutoJump), `arm movement still works after a charged jump and after the 3 s auto-jump (${arm.afterJump.moved} m / ${arm.afterAutoJump.moved} m)`);
+  ok(arm.jumped === 1 && arm.autoJumped && armOk(arm.afterJump) && armOk(arm.afterAutoJump), `arm movement still works after a charged jump and after the 2 s auto-jump (${arm.afterJump.moved} m / ${arm.afterAutoJump.moved} m)`);
   ok(arm.menuOpened && arm.menuOpen.moved < 0.05 && arm.menuClosed && armOk(arm.afterMenu), `Y menu open: pushes do nothing (${arm.menuOpen.moved} m); after closing it arm movement works again (${arm.afterMenu.moved} m)`);
   ok(arm.respawned && armOk(arm.afterRespawn) && arm.respawnedSpawn && armOk(arm.afterSpawnRespawn), `after a fall + respawn arm movement works (chasm -> first ledge ${arm.afterRespawn.moved} m back into the cave; cliff -> spawn ${arm.afterSpawnRespawn.moved} m) ` + JSON.stringify(arm));
   // ---------- 2f. the grey slick strip (last 3 m before the first ledge's lip): hand pushes slide you all the way to the lip (real WebXR input path), still slippery, and past the lip you fall ----------
@@ -265,20 +273,20 @@ const HELPERS = () => {
           S.hands[k] = down ? [s, 1.9 - 1.1 * (cyc / 0.5), zf * (0.48 - 0.25 * (cyc / 0.5))] : [s, 0.8 + 1.1 * ((cyc - 0.5) / 0.5), zf * 0.15]; }
         MM.step(1 / 72); t += 1 / 72; if (MM.PH.anyAnch) held++; minY = Math.min(minY, C.head().y); if (onPillar(i)) { top = true; break; } }
       rest(); C.run(1.0); return { i, side, t: +t.toFixed(2), held, top, stays: onPillar(i), spawned: C.spawns() > s0, startY: +(F - 1.0).toFixed(2), minY: +minY.toFixed(2) }; };
-    r.climb = [climb(0, 1), climb(1, 1), climb(2, -1), climb(1, -1)];
+    r.climb = [climb(0, 1), climb(1, 1), climb(2, -1), climb(1, -1), climb(3, 1)];
     // a slip off a pillar: walked off its edge with hands hanging: you can catch its side and climb back up
     stand(PC[0].x, PC[0].z - 0.4); { const s0 = C.spawns(); for (let i = 0; i < 72 * 1.2; i++) { S.head = [0, 1.6, -i / 72 * 0.8]; S.hands = [[-0.27, 0.98, S.head[2] - 0.2], [0.27, 0.98, S.head[2] - 0.2]]; MM.step(1 / 72); }
       const hy = C.head().y; r.slipOff = { below: +(F + 0.9 - hy).toFixed(2), spawned: C.spawns() > s0 }; }
     // ---- 2h: big jumps onto pillar 1 (from the first ledge's lip) and the far side, every way of holding A and moving the hands on landing ----
     const variants = {
-      autoHoldA: { hold: 9 },                              // 3 s auto-launch, A still held through the landing and after
-      autoReleaseAir: { hold: 3.4 },                       // auto-launch, A released in flight
-      autoReleaseAfterLand: { hold: 4.6 },                 // auto-launch, A released after landing
-      manual: { hold: 2.95 },                              // released just before full
-      manualRehold: { hold: 2.95, reA: 3.15 },             // released to jump, A pressed again in flight and held through landing
-      handsLow: { hold: 9, hands: t => t > 3.2 ? [[-0.3, 0.55, -0.1], [0.3, 0.55, -0.1]] : null },        // hands down at/through the ground when you land
-      handsSlam: { hold: 3.5, hands: t => t > 3.2 ? [[-0.3, 0.98 - Math.min(1, (t - 3.2) * 2) * 0.5, -0.25], [0.3, 0.98 - Math.min(1, (t - 3.2) * 2) * 0.5, -0.25]] : null }, // hands slammed down on landing
-      handsSwing: { hold: 9, hands: t => t > 3.2 ? [[-0.3, 1.0, -0.2 + 0.25 * Math.sin(t * 8)], [0.3, 1.0, -0.2 - 0.25 * Math.sin(t * 8)]] : null }, // hands waving about (not pushing)
+      autoHoldA: { hold: 9 },                              // 2 s auto-launch, A still held through the landing and after
+      autoReleaseAir: { hold: 2.4 },                       // auto-launch, A released in flight
+      autoReleaseAfterLand: { hold: 3.6 },                 // auto-launch, A released after landing
+      manual: { hold: 1.95 },                              // released just before full
+      manualRehold: { hold: 1.95, reA: 2.15 },             // released to jump, A pressed again in flight and held through landing
+      handsLow: { hold: 9, hands: t => t > 2.2 ? [[-0.3, 0.55, -0.1], [0.3, 0.55, -0.1]] : null },        // hands down at/through the ground when you land
+      handsSlam: { hold: 2.5, hands: t => t > 2.2 ? [[-0.3, 0.98 - Math.min(1, (t - 2.2) * 2) * 0.5, -0.25], [0.3, 0.98 - Math.min(1, (t - 2.2) * 2) * 0.5, -0.25]] : null }, // hands slammed down on landing
+      handsSwing: { hold: 9, hands: t => t > 2.2 ? [[-0.3, 1.0, -0.2 + 0.25 * Math.sin(t * 8)], [0.3, 1.0, -0.2 - 0.25 * Math.sin(t * 8)]] : null }, // hands waving about (not pushing)
       bob: { hold: 9, head: t => [0, 1.6 + 0.02 * Math.sin(t * 9), 0] },
     };
     r.land = {};
@@ -286,14 +294,14 @@ const HELPERS = () => {
       stand(3, CX.ledgeZ + 0.3); const n0 = J.count, s0 = C.spawns(); A(true); let t = 0, landT = null, yL = 0, rise = 0, vUp = 0;
       while (t < 7.5) { if (v.reA != null && t >= v.reA) A(true); else if (t >= v.hold) A(false); const hh = v.hands && v.hands(t); if (hh) S.hands = hh; if (v.head) S.head = v.head(t);
         MM.step(1 / 72); t += 1 / 72; const h = C.head();
-        if (J.count > n0 && landT === null && MM.PH.grounded && t > 3.2) { landT = t; yL = h.y; }
+        if (J.count > n0 && landT === null && MM.PH.grounded && t > 2.2) { landT = t; yL = h.y; }
         if (landT !== null) { rise = Math.max(rise, h.y - yL); vUp = Math.max(vUp, MM.PH.V.y); } }
       A(false); rest(); C.run(0.5); r.land[name] = { jumps: J.count - n0, landT: landT && +landT.toFixed(2), rise: +rise.toFixed(2), vUp: +vUp.toFixed(2), on1: onPillar(0), spawned: C.spawns() > s0, charging: J.charging };
     }
     // and the same from pillar 1 to pillar 2, and onto the first ledge from the tunnel side (landing on flat ground)
     for (const [name, x, z] of [['p1->p2', PC[0].x, PC[0].z - CX.PR + 0.25], ['flat', 3, -38]]) {
       stand(x, z); const n0 = J.count; A(true); let t = 0, landT = null, yL = 0, rise = 0;
-      while (t < 7) { S.hands = t > 3.2 ? [[-0.3, 0.55, -0.1], [0.3, 0.55, -0.1]] : S.hands; MM.step(1 / 72); t += 1 / 72; const h = C.head(); if (J.count > n0 && landT === null && MM.PH.grounded && t > 3.2) { landT = t; yL = h.y; } if (landT !== null) rise = Math.max(rise, h.y - yL); }
+      while (t < 7) { S.hands = t > 2.2 ? [[-0.3, 0.55, -0.1], [0.3, 0.55, -0.1]] : S.hands; MM.step(1 / 72); t += 1 / 72; const h = C.head(); if (J.count > n0 && landT === null && MM.PH.grounded && t > 2.2) { landT = t; yL = h.y; } if (landT !== null) rise = Math.max(rise, h.y - yL); }
       A(false); rest(); C.run(0.5); r.land[name] = { jumps: J.count - n0, rise: +rise.toFixed(2), on2: name === 'p1->p2' ? onPillar(1) : null, grounded: MM.PH.grounded };
     }
     MM.xrSim = null; C.idle(0);
@@ -301,7 +309,7 @@ const HELPERS = () => {
   });
   ok(pil.top.every(t => t.moved > 0.3 && t.holds > 10 && t.on) && pil.side.moved > 0.3 && pil.side.on, 'pillar tops are walkable rock: controller pushes move you across every pillar top (and sideways) and you stay on it ' + JSON.stringify([pil.top, pil.side]));
   ok(pil.climb.every(c => c.top && c.stays && !c.spawned && c.held > 20), 'pillar sides are climbable: hanging 1 m below the top beside a pillar, hand-over-hand climbing gets you back up onto its top (both sides, all pillars, no lip in the way) ' + JSON.stringify(pil.climb.map(c => [c.i + 1, c.side, c.t, c.held])));
-  ok(Object.values(pil.land).every(l => l.jumps === 1 && l.rise < 0.12 && (l.vUp === undefined || l.vUp < 0.5)) && ['autoHoldA', 'autoReleaseAir', 'autoReleaseAfterLand', 'manual', 'manualRehold', 'handsLow', 'handsSlam', 'handsSwing', 'bob'].every(k => pil.land[k].on1 && !pil.land[k].spawned && !pil.land[k].charging) && pil.land['p1->p2'].on2 && pil.land.flat.grounded, 'a big jump onto a pillar (3 s auto-jump with A still held, released in the air / after landing, manual release, A pressed again in flight and held, hands low / slammed down / waving on landing, head bob) or onto flat ground lands and stays: exactly one jump, no bounce or second launch ' + JSON.stringify(pil.land));
+  ok(Object.values(pil.land).every(l => l.jumps === 1 && l.rise < 0.12 && (l.vUp === undefined || l.vUp < 0.5)) && ['autoHoldA', 'autoReleaseAir', 'autoReleaseAfterLand', 'manual', 'manualRehold', 'handsLow', 'handsSlam', 'handsSwing', 'bob'].every(k => pil.land[k].on1 && !pil.land[k].spawned && !pil.land[k].charging) && pil.land['p1->p2'].on2 && pil.land.flat.grounded, 'a big jump onto a pillar (2 s auto-jump with A still held, released in the air / after landing, manual release, A pressed again in flight and held, hands low / slammed down / waving on landing, head bob) or onto flat ground lands and stays: exactly one jump, no bounce or second launch ' + JSON.stringify(pil.land));
   // ---------- 3. falling = 2 s, then back on the last place you stood (safe spot away from its drop); jungle / Restart -> spawn ----------
   const fall = await p.evaluate(() => {
     const r = [], CX = MM.CX, F = CX.F, PC = CX.pillars, HALF_OUT = MM.HALF + 6;
@@ -309,8 +317,8 @@ const HELPERS = () => {
     const cases = [
       ['first ledge', 3, CX.ledgeZ + 1.5, F, [3, CX.ledgeZ - 1.5], [3, F, CX.ledgeZ + 1]],
       ['first ledge (side)', -1, CX.ledgeZ + 0.5, F, [-1, CX.ledgeZ - 1.2], [3, F, CX.ledgeZ + 1]],
-      ...PC.map((pc, i) => ['pillar ' + (i + 1), pc.x + 0.4, pc.z + 0.3, F, [pc.x, pc.z - CX.PR - 1.8], [pc.x, F, pc.z]]),
-      ['pillar 2 (fell back)', PC[1].x - 0.5, PC[1].z, F, [PC[1].x, PC[1].z + CX.PR + 1.8], [PC[1].x, F, PC[1].z]],
+      ...PC.map((pc, i) => ['pillar ' + (i + 1), pc.x + 0.4, pc.z + 0.3, F, [pc.x, pc.z - CX.PR - 1.8], [3, F, CX.ledgeZ + 1]]),
+      ['pillar 2 (fell back)', PC[1].x - 0.5, PC[1].z, F, [PC[1].x, PC[1].z + CX.PR + 1.8], [3, F, CX.ledgeZ + 1]],
       ['far ledge', 3, CX.endEdge - 1.5, F, [3, CX.endEdge + 1.2], [3, F, CX.endEdge - 1.2]],
       ['cliff lip', 10.9, -72, F, [11.9, -71.5], [CX.lip.c.x - 0.7, F, CX.lip.c.z]],
       ['cliff ledge 1', 13.3, -72.95, F, [13.3, -71.4], [13.3, F, -72.95]],
@@ -326,33 +334,37 @@ const HELPERS = () => {
       r.push({ name, t: +t.toFixed(2), fell: +(y + 1 - minY).toFixed(1), timer: (MM.stats.fallResets || 0) > f0, plat: MM.lastRespawn, platSpawn: (MM.stats.ledgeSpawns || 0) === l0 + 1,
         off: +Math.hypot(h.x - exp[0], h.z - exp[2]).toFixed(2), dy: +(h.y - exp[1] - 0.9).toFixed(2), stays: Math.hypot(h2.x - h.x, h2.z - h.z) < 0.05 && Math.abs(h2.y - h.y) < 0.05 && C.spawns() === s0 + 1 });
     }
-    // no platform since the last spawn (e.g. dropped straight into the chasm from the jungle) -> spawn
+    // stood in the jungle then dropped into the chasm -> back to the last place stood in the jungle
     C.stand(0, 4, 0, MM.terrainH(0, 4)); const s0 = C.spawns(); MM.place(3, F + 1, -56); let t = 0; while (C.spawns() === s0 && t < 4) { MM.step(1 / 72); t += 1 / 72; } const h = C.head();
-    r.jungle = { atSpawn: Math.hypot(h.x, h.z) < 2 && h.y < 3 && C.spawns() === s0 + 1, h: h.toArray().map(v => +v.toFixed(2)), n: C.spawns() - s0 };
-    return { list: r, jungle: r.jungle };
+    r.jungle = { back: Math.hypot(h.x, h.z - 4) < 2.5 && h.y < 3 && C.spawns() === s0 + 1, plat: MM.lastRespawn, h: h.toArray().map(v => +v.toFixed(2)), n: C.spawns() - s0 };
+    // no platform / last-stand since a fresh spawn: drop straight into the chasm -> spawn
+    MM.PH.lastPlat = null; MM.PH.lastStand = null; const s1 = C.spawns(); MM.place(3, F + 1, -56); t = 0; while (C.spawns() === s1 && t < 4) { MM.step(1 / 72); t += 1 / 72; } const h2 = C.head();
+    r.fresh = { atSpawn: Math.hypot(h2.x, h2.z) < 2 && h2.y < 3 && C.spawns() === s1 + 1, h: h2.toArray().map(v => +v.toFixed(2)) };
+    return { list: r, jungle: r.jungle, fresh: r.fresh };
   });
-  ok(fall.list.every(f => Math.abs(f.t - 2.0) < 0.05 && f.fell > 10 && f.timer && f.platSpawn && f.plat === f.name.replace(/ \(.*\)$/, '') && f.off < 0.15 && Math.abs(f.dy) < 0.5 && f.stays), 'falling = 2 s, then back on the last place you stood, at a safe spot (first ledge 1 m back from the lip, pillar centre, far ledge 1.2 m back, end of the side tunnel for the cliff lip, centre of each 1x1 cliff ledge, on the long ledge where you were) and you stay there: ' + JSON.stringify(fall.list.map(f => [f.name, f.t, f.plat, f.off, f.dy, f.stays])));
-  ok(fall.jungle.atSpawn, 'no platform stood on since the last spawn -> a fall still goes to spawn (Restart -> spawn is checked in the menu tests) ' + JSON.stringify(fall.jungle));
+  ok(fall.list.every(f => Math.abs(f.t - 2.0) < 0.05 && f.fell > 10 && f.timer && f.platSpawn && (f.name.startsWith('pillar') ? f.plat === 'first ledge' : f.plat === f.name.replace(/ \(.*\)$/, '')) && f.off < 0.15 && Math.abs(f.dy) < 0.5 && f.stays), 'falling = 2 s, then back on the last place you stood (any pillar fall returns to the first ledge; other falls stay on that platform, safe spot) ' + JSON.stringify(fall.list.map(f => [f.name, f.t, f.plat, f.off, f.dy, f.stays])));
+  ok(fall.jungle.back && fall.jungle.plat === 'jungle', 'stood in the jungle then fell into the chasm -> back to the last place you stood ' + JSON.stringify(fall.jungle));
+  ok(fall.fresh.atSpawn, 'no platform stood on since the last spawn -> a fall still goes to spawn (Restart -> spawn is checked in the menu tests) ' + JSON.stringify(fall.fresh));
   // ---------- 4. play area: standing anywhere in the cave system never respawns ----------
   const stay = await p.evaluate(() => {
-    const CX = MM.CX, spots = [[3, -27.5, 0], [3, -31, 0], [3, -40, 0], [5, -44, 0], [3, CX.ledgeZ + 0.2, 0], [3, CX.pillars[1].z, 0], [3, -72.5, 0], [8, -72, -Math.PI / 2], [10.6, -72, -Math.PI / 2], [13.3, -72.9, -Math.PI / 2], [15.9, -72.9, -Math.PI / 2], [23, -72.9, -Math.PI / 2, CX.F + 3]];
+    const CX = MM.CX, spots = [[3, -27.5, 0], [3, -31, 0], [3, -40, 0], [5, -44, 0], [3, CX.ledgeZ + 0.2, 0], [3, CX.pillars[1].z, 0], [CX.pillars[3].x, CX.pillars[3].z, 0], [3, -72.5, 0], [8, -72, -Math.PI / 2], [10.6, -72, -Math.PI / 2], [13.3, -72.9, -Math.PI / 2], [15.9, -72.9, -Math.PI / 2], [23, -72.9, -Math.PI / 2, CX.F + 3], [6.2, -39.5, 0, CX.CLR_Y]];
     const s0 = C.spawns(), bad = [];
-    for (const [x, z, yaw, y] of spots) { C.stand(x, z, yaw, y ?? CX.F); C.run(2); const h = C.head(); if (Math.hypot(h.x - x, h.z - z) > 0.4 || Math.abs(h.y - ((y ?? CX.F) + 0.9)) > 0.15) bad.push([x, z, +h.x.toFixed(2), +h.y.toFixed(2), +h.z.toFixed(2)]); }
-    return { spawns: C.spawns() - s0, bad, oob: [MM.outOfBounds(3, CX.F + 1, -40), MM.outOfBounds(3, CX.F - 20, -59), MM.outOfBounds(30, CX.F - 100, -60), MM.outOfBounds(3, CX.F + 1, -90), MM.outOfBounds(-15, CX.F + 1, -40)] };
+    for (const [x, z, yaw, y] of spots) { C.stand(x, z, yaw, y ?? CX.F); C.run(2); const h = C.head(); if (Math.hypot(h.x - x, h.z - z) > 0.4 || Math.abs(h.y - ((y ?? CX.F) + 0.9)) > 0.25) bad.push([x, z, +h.x.toFixed(2), +h.y.toFixed(2), +h.z.toFixed(2)]); }
+    return { spawns: C.spawns() - s0, bad, oob: [MM.outOfBounds(3, CX.F + 1, -40), MM.outOfBounds(3, CX.F - 20, -59), MM.outOfBounds(30, CX.F - 100, -60), MM.outOfBounds(3, CX.F + 1, -90), MM.outOfBounds(-15, CX.F + 1, -40), MM.outOfBounds(-40, 1, 0), MM.outOfBounds(0, 1, 40)] };
   });
-  ok(stay.spawns === 0 && stay.bad.length === 0, 'tunnel, big cave, ledge, pillar top, ledge chamber, side tunnel, cliff lip and all ledges are solid play area (2 s each, no respawn, no drift) ' + JSON.stringify(stay.bad));
-  ok(stay.oob.join() === 'false,false,false,true,true', 'out-of-bounds: cave system, chasm and cliff air are in bounds; solid rock beyond them is out ' + stay.oob);
+  ok(stay.spawns === 0 && stay.bad.length === 0, 'tunnel, big cave, ledge, pillars 1-4, ledge chamber, side tunnel, cliff lip, all ledges and the top clearing are solid play area (2 s each, no respawn, no drift) ' + JSON.stringify(stay.bad));
+  ok(stay.oob.join() === 'false,false,false,true,true,false,false', 'out-of-bounds: cave system, chasm, cliff air and the south/west ocean drops are in bounds; solid rock beyond them is out ' + stay.oob);
   // ---------- 5. reachability by jumping only (no teleports): cave 2 -> tunnel -> big cave; chamber -> side tunnel -> cliff lip -> ledges ----------
   const reach = await p.evaluate(() => {
     const CX = MM.CX, r = {}; C.stand(3, -25.6, 0); const s0 = C.spawns(); let n = 0;
-    while (C.head().z > CX.ledgeZ + 4 && n < 40) { C.jump(1.82); C.land(); n++; }
+    while (C.head().z > CX.ledgeZ + 4 && n < 40) { C.jump(1.21); C.land(); n++; }
     MM.render(); r.cave = { hops: n, z: +C.head().z.toFixed(2), spawns: C.spawns() - s0, zone: MM.CX_STATE.zone, jungleHidden: !MM.CXG.in.parent.children.find(o => o.isMesh && o.geometry.attributes.position.count > 100000)?.visible };
     C.stand(3, -71.5, -Math.PI / 2); n = 0; const s1 = C.spawns();
-    while (C.head().x < 10.9 && n < 30) { C.jump(1.64); C.land(); n++; }
+    while (C.head().x < 10.9 && n < 30) { C.jump(1.09); C.land(); n++; }
     MM.render(); r.exit = { hops: n, x: +C.head().x.toFixed(2), spawns: C.spawns() - s1, zone: MM.CX_STATE.zone };
     // lip -> ledge 1 -> ledge 2 with medium charges
     C.stand(11.15, -72.9, -Math.PI / 2); const s2 = C.spawns(); r.ledges = [];
-    for (const [hold, target] of [[2.31, CX.ledges[0]], [2.31, CX.ledges[1]]]) { C.jump(hold); const l = C.land(); r.ledges.push(l.spawned ? 'fell' : +l.x.toFixed(2)); if (!l.spawned && Math.abs(l.x - target.c.x) < 0.8) { MM.place(target.c.x + target.h.x - 0.05, CX.F + 1.3, -72.9); C.run(0.5); } }
+    for (const [hold, target] of [[1.54, CX.ledges[0]], [1.54, CX.ledges[1]]]) { C.jump(hold); const l = C.land(); r.ledges.push(l.spawned ? 'fell' : +l.x.toFixed(2)); if (!l.spawned && Math.abs(l.x - target.c.x) < 0.8) { MM.place(target.c.x + target.h.x - 0.05, CX.F + 1.3, -72.9); C.run(0.5); } }
     r.ledgesOk = C.spawns() === s2 && r.ledges.every((x, i) => Math.abs(x - CX.ledges[i].c.x) < 0.8);
     return r;
   });
@@ -364,9 +376,9 @@ const HELPERS = () => {
     const CX = MM.CX, r = {}, v = C.vine(), F = CX.F;
     // grip alone does not grab the cliff vine; right trigger does (on a jump from ledge 2)
     C.resetVine(); C.stand(16.35, -72.8, -Math.PI / 2); MM.fake.hands[1].p = C.rot([0.18, 1.55, -0.6], -Math.PI / 2); MM.fake.hands[1].grip = true; C.run(0.2);
-    MM.fake.a = true; C.run(2.03); MM.fake.a = false; let grabbedGrip = false; C.run(0.6, () => { if (MM.PH.hands.some(h => h.vine === v)) grabbedGrip = true; }); r.gripOnly = grabbedGrip;
+    MM.fake.a = true; C.run(1.35); MM.fake.a = false; let grabbedGrip = false; C.run(0.6, () => { if (MM.PH.hands.some(h => h.vine === v)) grabbedGrip = true; }); r.gripOnly = grabbedGrip;
     C.resetVine(); C.stand(16.35, -72.8, -Math.PI / 2); MM.fake.hands[1].p = C.rot([0.18, 1.55, -0.6], -Math.PI / 2); MM.fake.hands[1].trig = true; C.run(0.2);
-    MM.fake.a = true; C.run(2.03); MM.fake.a = false; let tg = -1; C.run(1.0, t => { if (tg < 0 && MM.PH.hands[1].vine === v) tg = t; });
+    MM.fake.a = true; C.run(1.35); MM.fake.a = false; let tg = -1; C.run(1.0, t => { if (tg < 0 && MM.PH.hands[1].vine === v) tg = t; });
     r.rightGrab = tg >= 0; r.closedR = MM.myHands[1].geometry === MM.gorillaGeo.handRc && MM.myHands[0].geometry === MM.gorillaGeo.handL;
     // hang with ONE hand for 3 s
     const s0 = C.spawns(), yA = C.head().y; let lo = 99, hi = -99; C.run(3, () => { const y = C.head().y; lo = Math.min(lo, y); hi = Math.max(hi, y); });
@@ -388,10 +400,10 @@ const HELPERS = () => {
     C.run(0.6); r.afterPull = +(C.head().y - yp).toFixed(2); // still held up there, one hand
     r.vineHead = C.head().toArray().map(x => +x.toFixed(2));
     // charged jump off the vine onto the 6 m ledge
-    MM.fake.a = true; C.run(2.61); MM.fake.a = false; MM.fake.hands[0].trig = MM.fake.hands[1].trig = false; MM.fake.hands[0].p = C.rot([-0.27, 0.98, -0.2], -Math.PI / 2); MM.fake.hands[1].p = C.rot([0.27, 0.98, -0.2], -Math.PI / 2);
+    MM.fake.a = true; C.run(1.74); MM.fake.a = false; MM.fake.hands[0].trig = MM.fake.hands[1].trig = false; MM.fake.hands[0].p = C.rot([-0.27, 0.98, -0.2], -Math.PI / 2); MM.fake.hands[1].p = C.rot([0.27, 0.98, -0.2], -Math.PI / 2);
     const l = C.land(); const L = CX.ledges[2]; r.longLedge = { ...l, on: !l.spawned && Math.abs(l.x - L.c.x) < L.h.x && Math.abs(l.y - (F + 3.9)) < 0.15 };
     // let go of the vine with both hands = fall
-    C.resetVine(); C.stand(16.35, -72.8, -Math.PI / 2); MM.fake.hands[1].p = C.rot([0.18, 1.55, -0.6], -Math.PI / 2); MM.fake.hands[1].trig = true; C.run(0.2); MM.fake.a = true; C.run(2.03); MM.fake.a = false; C.run(1.0); r.heldBefore = MM.PH.hands[1].vine === C.vine();
+    C.resetVine(); C.stand(16.35, -72.8, -Math.PI / 2); MM.fake.hands[1].p = C.rot([0.18, 1.55, -0.6], -Math.PI / 2); MM.fake.hands[1].trig = true; C.run(0.2); MM.fake.a = true; C.run(1.35); MM.fake.a = false; C.run(1.0); r.heldBefore = MM.PH.hands[1].vine === C.vine();
     const sF = C.spawns(); MM.fake.hands[1].trig = false; let tf = 0; while (C.spawns() === sF && tf < 4) { MM.step(1 / 72); tf += 1 / 72; } r.letGo = +tf.toFixed(2); { const h = C.head(), l = MM.CX.ledges[1]; r.letGoAt = { plat: MM.lastRespawn, off: +Math.hypot(h.x - l.c.x, h.z - l.c.z).toFixed(2) }; }
     // from the vine you fall back to the second ledge even if you last stood on the long ledge
     C.resetVine(); C.stand(21.5, -72.95, 0, MM.CX.F + 3); C.idle(-Math.PI / 2); { const v = C.vine(); C.handTo(1, C.vinePt(MM.CX.F + 4)); } MM.place(18.2 + 0.3, MM.CX.F + 4.6, -72.75); C.handTo(1, C.vinePt(MM.CX.F + 4.6)); MM.fake.hands[1].trig = true; C.run(0.5); r.vineHeld2 = !!MM.PH.hands[1].vine; MM.fake.hands[1].trig = false; { const s1 = C.spawns(); let t2 = 0; while (C.spawns() === s1 && t2 < 5) { MM.step(1 / 72); t2 += 1 / 72; } r.vineFall2 = MM.lastRespawn; }
@@ -416,17 +428,174 @@ const HELPERS = () => {
   // ---------- 8. performance / culling ----------
   const perf = await p.evaluate(() => {
     const CX = MM.CX, out = {}, info = () => { MM.render(); const i = MM.renderer.info.render; return { calls: i.calls, tris: i.triangles }; };
-    C.stand(0, 2, Math.PI); out.spawn = { ...info(), cave: MM.CXG.in.visible || MM.CXG.rt.visible || MM.CXG.out.visible };
+    C.stand(0, 2, Math.PI); out.spawn = { ...info(), cave: MM.CXG.in.visible || MM.CXG.rt.visible || MM.CXG.out.visible, top: MM.CXG.top.visible };
     C.stand(3, -25.6, 0); out.wallCave = { ...info(), in: MM.CXG.in.visible, out: MM.CXG.out.visible };
-    C.stand(3, -40, 0); out.bigCave = { ...info(), jungle: MM.scene.children.filter(o => o.visible && o.isMesh).length };
+    C.stand(3, -40, 0); out.bigCave = { ...info(), jungle: MM.scene.children.filter(o => o.visible && o.isMesh).length, top: MM.CXG.top.visible };
+    C.stand(3, CX.SHAFT.c.z, 0, CX.F); out.underShaft = { ...info(), top: MM.CXG.top.visible };
     C.stand(3, CX.pillars[1].z, 0); out.chasm = info();
+    C.stand(CX.pillars[3].x, CX.pillars[3].z, 0); out.pillar4 = info();
+    C.stand(6.2, -39.5, 0, CX.CLR_Y); out.clearing = { ...info(), top: MM.CXG.top.visible, zone: MM.CX_STATE.zone };
     C.stand(15.9, -72.9, -Math.PI / 2); out.cliff = { ...info(), in: MM.CXG.in.visible };
     return out;
   });
   console.log('INFO render', JSON.stringify(perf));
-  ok(!perf.spawn.cave && perf.wallCave.in && !perf.wallCave.out && !perf.cliff.in && perf.bigCave.calls <= perf.spawn.calls && perf.cliff.tris < 20000, 'cave system only drawn when near (hidden at spawn), jungle skipped deep inside, cliff view stays light');
-  ok(perf.spawn.calls <= 12 && perf.spawn.tris < 48000 && perf.wallCave.calls <= 18 && perf.bigCave.calls <= 10 && perf.cliff.calls <= 10 && perf.cliff.tris < 16000, 'perf budget after arch/detail pass (spawn/wall/cave/cliff calls+tris stay small on Quest): ' + JSON.stringify(perf));
+  ok(!perf.spawn.cave && !perf.spawn.top && perf.wallCave.in && !perf.wallCave.out && !perf.cliff.in && perf.bigCave.calls <= perf.spawn.calls + 4 && perf.cliff.tris < 20000, 'cave system only drawn when near (hidden at spawn), jungle skipped deep inside, cliff view stays light');
+  ok(perf.spawn.calls <= 16 && perf.spawn.tris < 90000 && perf.wallCave.calls <= 22 && perf.bigCave.calls <= 14 && perf.underShaft.calls <= 16 && perf.clearing.calls <= 20 && perf.cliff.calls <= 12 && perf.cliff.tris < 18000, 'perf budget after cave expansion (spawn / under the shaft / pillars / clearing / cliff stay Quest-sized): ' + JSON.stringify(perf));
+  ok(perf.underShaft.top && perf.clearing.top && /clearing/.test(perf.clearing.zone), 'shaft light / top clearing group is drawn under the shaft and on the clearing ' + JSON.stringify({ u: perf.underShaft, c: perf.clearing }));
+
+  // ---------- 9. walls 3/4 are ocean cliffs; walls 1/2 remain; labels toggle ----------
+  const walls = await p.evaluate(() => {
+    const r = {}, HALF = MM.HALF, CX = MM.CX;
+    r.ids = MM.colliders.filter(c => c.wall).map(c => c.wall);
+    r.noSW = !MM.colliders.some(c => c.wall === 'S') && r.ids.filter(w => w === 'W').length <= 1; // only the mountain's west face north of spawn, not an above-ground south/west wall
+    // walk off the south edge of the jungle: 2 s fall, back to last place stood (not a wall)
+    C.stand(0, 22, 0, MM.terrainH(0, 22)); const s0 = C.spawns(), p0 = C.head();
+    MM.place(0, 1.5, HALF + 1.2);
+    let t = 0; while (C.spawns() === s0 && t < 4) { MM.step(1 / 72); t += 1 / 72; }
+    const h = C.head();
+    r.south = { t: +t.toFixed(2), plat: MM.lastRespawn, back: Math.hypot(h.x - p0.x, h.z - p0.z) < 3 && h.y < 3, n: C.spawns() - s0 };
+    C.stand(-22, 0, 0, MM.terrainH(-22, 0)); const s1 = C.spawns(), p1 = C.head();
+    MM.place(-HALF - 1.2, 1.5, 0);
+    t = 0; while (C.spawns() === s1 && t < 4) { MM.step(1 / 72); t += 1 / 72; }
+    const h2 = C.head();
+    r.west = { t: +t.toFixed(2), plat: MM.lastRespawn, back: Math.hypot(h2.x - p1.x, h2.z - p1.z) < 3 && h2.y < 3, n: C.spawns() - s1 };
+    // wall 1 and 2 still block at mid-height
+    const T = MM.THREE, v = new T.Vector3();
+    const dN = (x, y, z) => { v.set(x, y, z); return +MM.nearest(v).d.toFixed(2); };
+    r.wall1 = dN(0, 4, -24.9) < 0.2;
+    r.wall2 = dN(24.9, 4, 0) < 0.2;
+    r.openS = dN(0, 1.2, 24.9) > 0.4; // no above-ground south wall
+    r.openW = dN(-24.9, 1.2, 0) > 0.4;
+    return r;
+  });
+  ok(walls.wall1 && walls.wall2 && walls.openS && walls.openW, 'walls 1 and 2 are still solid mountain faces; walls 3 and 4 are gone above ground ' + JSON.stringify(walls));
+  ok(Math.abs(walls.south.t - 2.0) < 0.1 && walls.south.back && walls.south.plat === 'jungle' && Math.abs(walls.west.t - 2.0) < 0.1 && walls.west.back, 'walking off the south or west ocean cliff falls 2 s, then back to the last place you stood ' + JSON.stringify([walls.south, walls.west]));
+
+  const lab = await p.evaluate(() => {
+    const r = {};
+    MM.labelsSet(false); r.offN = MM.LABELS.group.children.length; r.offVis = MM.LABELS.group.visible;
+    MM.labelsSet(true);
+    r.on = MM.LABELS.on && MM.LABELS.group.visible && MM.LABELS.items.length >= 24;
+    r.list = MM.LABELS.list.map(it => it.n + ' ' + it.name);
+    const bill = MM.LABELS.items[0].quaternion.clone();
+    MM.camera.quaternion.setFromEuler(new MM.THREE.Euler(0.3, 1.1, 0, 'YXZ'));
+    MM.render();
+    r.billed = MM.LABELS.items[0].quaternion.angleTo(MM.camera.quaternion) < 0.02;
+    MM.labelsSet(false); r.offAfter = !MM.LABELS.group.visible && !MM.LABELS.on;
+    r.saved = localStorage.getItem('mmcave_labels');
+    return r;
+  });
+  ok(lab.on && lab.offAfter && lab.saved === '0' && lab.list[0] === '1 Wall 1' && lab.list[12] === '13 Pillar 4' && lab.billed, 'Labels toggle: 24 numbered billboarded labels, off is hidden / zero-cost, remembered ' + JSON.stringify({ n: lab.list.length, billed: lab.billed, list: lab.list }));
+
+  // ---------- 10. pillar 4 is left of 3, same gap, walkable/climbable, pitch black beyond ----------
+  const p4 = await p.evaluate(() => {
+    const CX = MM.CX, p3 = CX.pillars[2], p4 = CX.pillars[3], r = {};
+    r.pos = { x: +p4.x.toFixed(2), z: +p4.z.toFixed(2), dx: +(p3.x - p4.x).toFixed(2), dz: +(p3.z - p4.z).toFixed(2) };
+    r.spacing = +(2 * CX.PR + CX.G).toFixed(2);
+    C.stand(p3.x - CX.PR + 0.15, p3.z, Math.PI / 2); C.jump(2.1); const l = C.land();
+    r.jump = { spawned: l.spawned, x: l.x && +l.x.toFixed(2), on: !l.spawned && Math.hypot((l.x || 0) - p4.x, (l.z || 0) - p4.z) < CX.PR + 0.2 };
+    // a short jump from 3 toward 4 falls
+    C.stand(p3.x - CX.PR + 0.15, p3.z, Math.PI / 2); C.jump(1.3); r.short = C.land().spawned;
+    // beyond pillar 4 (further left) is open void, no wall nearby
+    const T = MM.THREE, v = new T.Vector3(-10, CX.F, p4.z);
+    r.beyond = { d: +MM.nearest(v).d.toFixed(2), oob: MM.outOfBounds(-12, CX.F - 5, p4.z), interior: MM.cxInterior([-12, CX.F - 5, p4.z]) };
+    C.stand(p4.x, p4.z, 0); const s0 = C.spawns(); MM.place(p4.x - 3, CX.F + 1, p4.z);
+    let t = 0; while (C.spawns() === s0 && t < 4) { MM.step(1 / 72); t += 1 / 72; }
+    const h = C.head();
+    r.fall = { t: +t.toFixed(2), plat: MM.lastRespawn, onFirst: Math.hypot(h.x - 3, h.z - (CX.ledgeZ + 1)) < 0.3 };
+    return r;
+  });
+  ok(Math.abs(p4.pos.dx - p4.spacing) < 0.05 && Math.abs(p4.pos.dz) < 0.05 && p4.pos.x < 0, 'pillar 4 sits left of pillar 3 at the same 6 m centre spacing ' + JSON.stringify(p4.pos));
+  ok(p4.jump.on && p4.short && p4.fall.onFirst && p4.fall.plat === 'first ledge', 'a full 2 s jump from pillar 3 lands on pillar 4; a short one (and a fall beyond it) goes to the first ledge ' + JSON.stringify(p4));
+  ok(p4.beyond.d > 2 && p4.beyond.oob === false && p4.beyond.interior < 0, 'beyond pillar 4 the void is open pitch-black (no wall nearby, still in bounds) ' + JSON.stringify(p4.beyond));
+
+  // ---------- 11. ceiling shaft, vine, daylight, top clearing ----------
+  const shaft = await p.evaluate(() => {
+    const CX = MM.CX, r = {}, v = MM.VINES.find(q => q.shaft), F = CX.F, Y = CX.CLR_Y;
+    r.vine = !!(v && v.trig && v.L > 7 && v.top.y - v.L < F + 2.3 && v.top.y - v.L > F + 1.6);
+    r.r = CX.SHAFT.r;
+    // grab the shaft vine from the cave floor (trigger, one hand on the tip). Do not charge-jump: that plants the hands away from the vine.
+    const resetShaft = () => { v.q.copy(v.top).y -= v.L; v.qp.copy(v.q); for (const h of MM.PH.hands) { if (h.vine) { h.vine.held--; h.vine = null; } } };
+    resetShaft();
+    C.stand(3, CX.SHAFT.c.z, 0);
+    MM.JUMP.noGrab = 0; MM.fake.a = false;
+    const tip = v.top.clone(); tip.y = v.top.y - v.L;
+    const P0 = MM.rig.position;
+    MM.fake.hands[1].p = [tip.x - P0.x, tip.y - P0.y + MM.HAND_DROP, tip.z - P0.z];
+    MM.fake.hands[1].trig = true;
+    let tg = -1; C.run(0.4, t => { if (tg < 0 && MM.PH.hands[1].vine === v) tg = t; });
+    r.grab = tg >= 0 && MM.PH.hands[1].vine === v && !MM.PH.hands[0].vine;
+    // climb out the top: same hand-over-hand pull as the cliff vine
+    const shaftPt = y => { const t = Math.min(1, Math.max(0, (v.top.y - y) / Math.max(0.01, v.L))); return v.top.clone().lerp(v.q, t); };
+    const s0 = C.spawns(); let steps = 0, hand = 1;
+    while (C.head().y < Y + 0.6 && steps < 30) {
+      const start = MM.fake.hands[hand].p.slice();
+      C.run(0.4, t => { MM.fake.hands[hand].p = [start[0], start[1] - 0.5 * t / 0.4, start[2]]; });
+      const o = 1 - hand, pt = shaftPt(MM.handsW()[hand][1] + 0.45);
+      C.handTo(o, [pt.x, pt.y, pt.z]); MM.fake.hands[o].trig = true; C.run(0.08);
+      if (MM.PH.hands[o].vine !== v) { r.miss = steps; break; }
+      MM.fake.hands[hand].trig = false; C.run(0.05);
+      hand = o; steps++; if (C.spawns() > s0) break;
+    }
+    C.run(0.4); // settle onto the grass if the last pull brought us over the rim
+    r.climb = { steps, y: +C.head().y.toFixed(2), spawns: C.spawns() - s0, onTop: C.head().y > Y + 0.5 };
+    // stand on the clearing, look at trees west/north, fall off the south cliff -> back on the clearing
+    if (!r.climb.onTop) { C.stand(6.2, -39.5, 0, Y); }
+    // start on the plateau near the south lip, then step off toward the start (past wall 1)
+    C.stand(6.2, -26.8, 0, Y);
+    MM.updateCave(C.head());
+    r.zone = MM.CX_STATE.zone;
+    r.onClr = Math.abs(C.head().y - (Y + 0.9)) < 0.3;
+    r.platBefore = MM.PH.lastPlat && MM.PH.lastPlat.id;
+    const s1 = C.spawns(); MM.place(6.2, Y + 1.5, -24.8);
+    let t = 0; while (C.spawns() === s1 && t < 4) { MM.step(1 / 72); t += 1 / 72; }
+    const h = C.head();
+    r.fall = { t: +t.toFixed(2), plat: MM.lastRespawn, back: Math.hypot(h.x - 6.2, h.z + 39.5) < 1.2 && Math.abs(h.y - (Y + 0.9)) < 0.35 };
+    // tree wall: cannot walk north/west through the thicket
+    const T = MM.THREE, vv = new T.Vector3(-22, Y + 1, -40);
+    r.treeWall = MM.nearest(vv).d < 0.8;
+    resetShaft(); MM.fake.hands[0].trig = MM.fake.hands[1].trig = false; C.stand(0, 4, 0, MM.terrainH(0, 4));
+    return r;
+  });
+  ok(shaft.vine && shaft.r >= 0.55 && shaft.r <= 0.7, 'shaft vine hangs to about 2.1 m above the wide-cave floor, shaft is ~1.2 m across ' + JSON.stringify({ vine: shaft.vine, r: shaft.r }));
+  ok(shaft.grab, 'either trigger grabs the shaft vine from a jump in the wide cave (one hand can hang)');
+  ok(shaft.climb.onTop && shaft.climb.spawns === 0, 'climbing the shaft vine gets you out onto the mountain-top clearing ' + JSON.stringify(shaft.climb));
+  ok(shaft.onClr && /clearing/.test(shaft.zone) && shaft.fall.plat === 'top clearing' && shaft.fall.back && Math.abs(shaft.fall.t - 2.0) < 0.1 && shaft.treeWall, 'clearing is open grass, tree wall to the west/north, falling off the south cliff (toward the start) returns you there ' + JSON.stringify(shaft));
+
+  // ---------- 12. players don't clip through each other; two won't fit on the shaft vine ----------
+  const peers = await p.evaluate(() => {
+    const r = {}, CX = MM.CX, BODY = MM.BODY_R;
+    MM.PH.freeze = false; MM.xrSim = null;
+    C.stand(0, 8, 0, MM.terrainH(0, 8)); // open grass, away from the spawn rocks / mirror
+    const h0 = C.head();
+    r.h0 = h0.toArray().map(v => +v.toFixed(2));
+    const id = MM.addTestRemote('peer-a', [h0.x + 0.15, h0.y, h0.z], '#cc6633');
+    r.nRemotes = MM.NET.remotes.size;
+    for (let i = 0; i < 36; i++) MM.step(1 / 72);
+    const h1 = C.head();
+    const rem = MM.NET.remotes.get('peer-a');
+    r.sep = +Math.hypot(h1.x - rem.headPos.x, h1.z - rem.headPos.z).toFixed(3);
+    r.minSep = +(BODY * 2 - 0.05).toFixed(2);
+    r.pushed = r.sep >= r.minSep - 0.05;
+    r.y = +h1.y.toFixed(2);
+    r.noLaunch = Math.abs(h1.y - h0.y) < 0.25 && MM.PH.V.y < 1;
+    // shaft: a remote already on the vine; hold height so gravity doesn't drop us out of the push window. The 1.22 m shaft is narrower than two capsules, so they jam against opposite walls (~0.5 m apart) rather than fully separating.
+    const sc = CX.SHAFT.c, midY = (CX.SHAFT.y0 + CX.CLR_Y) / 2, holdY = midY + 0.9;
+    MM.moveTestRemote(id, [sc.x + 0.15, holdY, sc.z]);
+    MM.place(sc.x - 0.15, holdY, sc.z);
+    for (let i = 0; i < 36; i++) { MM.step(1 / 72); MM.rig.position.y += holdY - C.head().y; MM.PH.V.y = 0; }
+    const h2 = C.head();
+    r.shaftSep = +Math.hypot(h2.x - (sc.x + 0.15), h2.z - sc.z).toFixed(3);
+    r.shaftOut = r.shaftSep >= 0.45; // pushed apart as far as the shaft walls allow
+    r.bothInside = Math.hypot(h2.x - sc.x, h2.z - sc.z) < CX.SHAFT.r - BODY && Math.hypot(0.15, 0) < CX.SHAFT.r - BODY;
+    MM.removeTestRemote(id);
+    return r;
+  });
+  ok(peers.pushed && peers.noLaunch, 'a simulated remote body pushes the local player out smoothly (no clip, no launch) ' + JSON.stringify(peers));
+  ok(peers.shaftOut && !peers.bothInside, 'two body capsules cannot stand side by side inside the shaft ' + JSON.stringify(peers));
+
   // ---------- 8b. both wall-cave entrances are arched: walk through the centre and near each side; no snag, no respawn; collision matches the arch ----------
+
   const arch = await p.evaluate(() => {
     const A = MM.CAVE_ARCH, T = MM.THREE, v = new T.Vector3(), r = { walks: [], probes: [], cap: [] };
     const open = (x, y, z) => { v.set(x, y, z); return MM.nearest(v).d > 0.12; };
@@ -518,6 +687,7 @@ const HELPERS = () => {
     const touch = (hand, id) => { C.handTo(hand, MM.menuBtnW(id)); C.run(0.15); const rest = hand ? [0.27, 0.98, -0.2] : [-0.27, 0.98, -0.2]; MM.fake.hands[hand].p = C.rot(rest, Math.PI / 2); C.run(0.45); };
     const d0 = MM.DBG.on; touch(1, 'debug'); r.debugR = MM.DBG.on !== d0; r.debugSaved = localStorage.getItem('mmcave_debug'); touch(0, 'debug'); r.debugL = MM.DBG.on === d0;
     const c0 = M.count; C.handTo(1, MM.menuBtnW('debug')); C.run(1.0); r.heldOnce = M.count - c0; MM.fake.hands[1].p = C.rot([0.27, 0.98, -0.2], Math.PI / 2); C.run(0.45); if (MM.DBG.on !== d0) MM.dbgSet(d0);
+    const l0 = MM.LABELS.on; touch(1, 'labels'); r.labels = { on: MM.LABELS.on, was: l0, saved: localStorage.getItem('mmcave_labels'), vis: MM.LABELS.group.visible }; touch(1, 'labels'); r.labelsBack = MM.LABELS.on === l0;
     const m0 = MM.MUSIC.on; touch(1, 'music'); r.music = { on: MM.MUSIC.on, was: m0, saved: localStorage.getItem('mmcave_music'), gain: MM.AU.master ? MM.AU.master.gain.value : null, voiceBus: !!MM.AU.out }; touch(1, 'music'); r.musicBack = { on: MM.MUSIC.on, gain: MM.AU.master ? MM.AU.master.gain.value : null };
     touch(0, 'resume'); r.resume = !M.open;
     // closing with A still held does not start a charge until A is released
@@ -536,6 +706,7 @@ const HELPERS = () => {
   ok(menu.place.open && Math.abs(menu.place.dist - 0.55) < 0.05 && menu.place.dx < -0.5 && Math.abs(menu.place.dz) < 0.05 && menu.place.below > 0.05 && menu.place.below < 0.2, 'menu opens 0.55 m in front of where you look, slightly below eye level ' + JSON.stringify(menu.place));
   ok(!menu.blocked.charging && menu.blocked.jumps === 0 && menu.blocked.moved < 0.03, 'while the menu is open A does not charge/jump and arm pushes do not move you ' + JSON.stringify(menu.blocked));
   ok(menu.debugR && menu.debugSaved !== null && menu.debugL && menu.heldOnce === 1, 'Debug: touching it with the right or the left hand toggles the debug overlay (same saved state as the wrist button); holding a hand on it toggles once');
+  ok(menu.labels.on === !menu.labels.was && menu.labels.saved === (menu.labels.on ? '1' : '0') && menu.labels.vis === menu.labels.on && menu.labelsBack, 'Labels: Y-menu toggle shows/hides the numbered labels, remembered in localStorage ' + JSON.stringify(menu.labels));
   ok(menu.music.on === !menu.music.was && menu.music.saved === (menu.music.on ? '1' : '0') && (menu.music.gain === null || menu.music.gain === (menu.music.on ? 0.9 : 0)) && menu.music.voiceBus && menu.musicBack.on === menu.music.was, 'Sound: toggles all game sound (no music track exists; voice chat on its own bus), remembered in localStorage ' + JSON.stringify([menu.music, menu.musicBack]));
   ok(menu.resume, 'Resume closes the menu');
   ok(!menu.closeHeldA && menu.afterRelease, 'closing the menu with A still held does not start a charge; release and press again does');
@@ -590,7 +761,18 @@ const HELPERS = () => {
   await shot('cave_vine.png', [16.2, HH, -72.7], -Math.PI / 2 + 0.05, 0.25, [{ p: C_rot([-0.2, 1.1, -0.4], -Math.PI / 2), trig: false }, { p: C_rot([0.1, 1.5, -0.5], -Math.PI / 2), trig: true }]);
   await shot('cave_long_ledge.png', [20.4, HH + 3, -72.9], -Math.PI / 2, -0.12);
   await shot('cave_hands_closed.png', [20.4, HH + 3, -72.9], -Math.PI / 2, -0.55, [{ p: C_rot([-0.2, 1.2, -0.42], -Math.PI / 2), trig: true }, { p: C_rot([0.2, 1.2, -0.42], -Math.PI / 2), trig: false }]);
-  await p.evaluate(() => { MM.PH.freeze = false; C.stand(0, 4, 0, MM.terrainH(0, 4)); MM.fake.headQ = C.q(0, -0.6); MM.fake.a = true; C.run(2.5); MM.render(); });
+  // expansion shots: walls 1/2 + ocean where 3/4 were, labels, shaft, vine, clearing, pillar 4, whole mountain
+  await p.evaluate(() => MM.labelsSet(true));
+  await shot('cave_spawn_ocean.png', [0, 2.4, 20], Math.PI, -0.28); // south edge: ground ends, drop where wall 3 was
+  await shot('cave_wall12_labels.png', [-16, 5, 8], -0.91, 0.06); // from the west, both wall 1 and wall 2 in frame
+  await shot('cave_shaft_below.png', [3, F + 1.4, -38], 0, 1.15);
+  await shot('cave_shaft_vine.png', [3, F + 1.5, -42.3], 0, 1.2, [{ p: [ -0.1, 2.0, -0.1 ] }, { p: [ 0.1, 2.0, 0.1 ] }]);
+  await shot('cave_clearing_trees.png', [6.2, MM_CLR + 1.6, -39.5], 0.7, 0.05); // look NW at the tree wall
+  await shot('cave_clearing_cliff.png', [6.2, MM_CLR + 1.8, -27.2], Math.PI, -0.18); // south lip, looking toward the start
+  await shot('cave_pillar4_dark.png', [3, F + 1.5, -65], Math.PI / 2, -0.08); // from pillar 3, look left at pillar 4 and the void
+  await shot('cave_mountain_outside.png', [22, 10, 16], 0.35, -0.12); // east of spawn, look NW at the whole mountain
+  await p.evaluate(() => MM.labelsSet(false));
+  await p.evaluate(() => { MM.PH.freeze = false; C.stand(0, 4, 0, MM.terrainH(0, 4)); MM.fake.headQ = C.q(0, -0.6); MM.fake.a = true; C.run(1.6); MM.render(); });
   await p.screenshot({ path: SHOTS + 'cave_jump_charge.png' });
   await p.evaluate(() => { MM.fake.a = false; C.run(0.05); MM.render(); });
   await b.close();
@@ -598,3 +780,4 @@ const HELPERS = () => {
 })().catch(e => { console.error(e); process.exit(2); });
 function C_rot(o, yaw) { const c = Math.cos(yaw), s = Math.sin(yaw); return [o[0] * c + o[2] * s, o[1], -o[0] * s + o[2] * c]; }
 var MM_LEDGE_Z = -48;
+var MM_CLR = 15;

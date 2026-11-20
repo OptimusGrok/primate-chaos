@@ -106,7 +106,7 @@ const HELPERS = () => {
   ok(/FPS \d+/.test(T) && /frame [\d.]+ ms/.test(T) && /cpu [\d.]+ ms/.test(T) && /worst frame \(last 5 s\): [\d.]+ ms/.test(T), 'shows FPS, frame time and the rolling worst frame: ' + T.split('\n').slice(1, 3).join(' | '));
   ok(/JS heap: (\d+\.\d \/ \d+ MB|n\/a)/.test(T), 'shows JS heap (or n/a): ' + T.split('\n')[3]);
   ok(/textures \d+/.test(T) && /geometries \d+/.test(T) && /programs \d+/.test(T) && /draw calls \d+/.test(T) && /triangles [\d.]+k?/.test(T), 'shows renderer.info: ' + T.split('\n').slice(4, 6).join(' | '));
-  ok(T.includes('cave-test dbg1') && /area: \S/.test(T) && /\(-?[\d.]+, -?[\d.]+, -?[\d.]+\)/.test(T), 'shows version tag, area and position: ' + T.split('\n')[0] + ' | ' + T.split('\n')[6]);
+  ok(/cave-test dbg/.test(T) && /area: \S/.test(T) && /\(-?[\d.]+, -?[\d.]+, -?[\d.]+\)/.test(T), 'shows version tag, area and position: ' + T.split('\n')[0] + ' | ' + T.split('\n')[6]);
   ok(/recent errors: none/.test(T), 'a clean load shows "recent errors: none"');
   ok(on.updates >= 4 && on.updates < on.frames / 2 && on.updates <= 2.2 * 4 + 3, `text refreshes a few times a second, not per frame: ${on.updates} refreshes over ${on.frames} frames in 2.2 s`);
   const areas = await p.evaluate(() => {

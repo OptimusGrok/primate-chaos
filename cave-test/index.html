@@ -13,9 +13,11 @@
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#0d2a1a;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#fff}
 canvas{display:block}
-#landing{position:fixed;inset:0;display:flex;align-items:flex-start;justify-content:center;background:radial-gradient(ellipse at 50% 30%,rgba(40,120,60,.82),rgba(5,25,15,.94));z-index:5;overflow:auto}
+#landing{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;background:#000;z-index:5;overflow:auto}
 #landing.hidden{display:none}
-.card{max-width:560px;width:92%;text-align:center;padding:18px 10px;margin:auto}
+#matrix{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;background:#000}
+.testHero{position:relative;z-index:2;margin:18px 0 0;text-align:center;font:900 clamp(96px,28vw,280px)/0.82 "Courier New",ui-monospace,monospace;color:#7CFF6B;letter-spacing:0.12em;text-shadow:0 0 18px #00ff41,0 0 48px #00ff41,0 0 80px #39ff14;pointer-events:none;user-select:none}
+.card{position:relative;z-index:2;max-width:560px;width:92%;text-align:center;padding:18px 10px;margin:8px auto 24px;background:rgba(0,10,4,.62);border:1px solid rgba(57,255,20,.25);border-radius:16px;backdrop-filter:blur(2px)}
 h1{font-size:clamp(38px,9vw,72px);margin:0 0 4px;letter-spacing:2px;color:#ffd23f;text-shadow:0 4px 0 #a0521d,0 8px 18px rgba(0,0,0,.5);font-weight:900}
 .sub{opacity:.9;margin:0 0 16px;font-size:16px}
 #enterVR{font-size:28px;font-weight:900;padding:18px 44px;border:0;border-radius:18px;background:#ffb000;color:#3a1a00;box-shadow:0 6px 0 #a86200;cursor:pointer;letter-spacing:1px}
@@ -41,7 +43,10 @@ h1{font-size:clamp(38px,9vw,72px);margin:0 0 4px;letter-spacing:2px;color:#ffd23
 </style>
 </head>
 <body>
-<div id="landing"><div class="card">
+<div id="landing">
+<canvas id="matrix" aria-hidden="true"></canvas>
+<div class="testHero">TEST</div>
+<div class="card">
   <h1>PRIMATE CHAOS</h1>
   <p class="sub"><b style="color:#ff9a3a">CAVE TEST BUILD</b> · separate rooms from the live game · <a href="../" style="color:#ffd23f">live game</a></p>
   <button id="enterVR" disabled>Checking VR…</button><br>
@@ -56,9 +61,9 @@ h1{font-size:clamp(38px,9vw,72px);margin:0 0 4px;letter-spacing:2px;color:#ffd23
   <button id="dbgLand" type="button">DEBUG: OFF (tap to toggle)</button>
   <div class="how">
     <b>How to play (Meta Quest):</b> no joysticks. Put your hands on the ground and push off to move, like a gorilla. Swing your arms backwards to run, push down hard to jump.<br>
-    <b>Climb:</b> push against trees, rocks and the lower rock wall, or hold <b>grip</b> to grab and pull yourself up. The upper wall is too smooth to climb.<br>
-    <b>Vines:</b> hold <b>grip</b> on a vine to swing. Let go to fly.<br>
-    <b>Test build:</b> hold <b>A</b> to charge a jump (full at 3 s, hands on the ground), let go to leap. Find the tunnel at the back of the upper wall cave. The cliff vine is grabbed with the <b>triggers</b> (either hand); a trigger closes your hand. Press <b>Y</b> (left controller) for the menu: sound, debug, restart, exit, resume.<br>
+    <b>Climb:</b> push against trees, rocks and the lower rock wall, or hold <b>grip</b> to grab and pull yourself up. You can climb the lower 9 m of the mountain walls.<br>
+    <b>Vines:</b> hold <b>grip</b> on a vine to swing. Let go to fly. The cave shaft vine and the cliff vine are grabbed with the <b>triggers</b> (either hand).<br>
+    <b>Test build:</b> hold <b>A</b> to charge a jump (full at 2 s, hands on the ground), let go to leap — or it jumps by itself at 2 s. Find the tunnel at the back of the upper wall cave. A ceiling shaft in the wide cave climbs out to a mountain-top clearing. Walls 3 and 4 (south and west) are ocean cliffs. Press <b>Y</b> (left controller) for the menu: sound, debug, labels, restart, exit, resume.<br>
     <b>Tag:</b> lava monkeys are IT. Touch others with a hand to infect them. When everyone is lava, a new round starts.<br>
     <b>Bananas:</b> grab them for points. <b>Canopy course:</b> climb the tree with the sign to the start pad, then race to the finish.<br>
     <b>Wrist:</b> look at your left wrist for bananas and timer. Tap the red button with your right hand to mute your mic, or the DEBUG button (left of the panel) to show the debug overlay (also: ?debug=1).
@@ -66,7 +71,7 @@ h1{font-size:clamp(38px,9vw,72px);margin:0 0 4px;letter-spacing:2px;color:#ffd23
 </div></div>
 <div id="hud"></div>
 <button id="dbgFlat" type="button">DEBUG: OFF</button>
-<div id="hint">Drag/click: look · W A S D: swing arms · Space: jump · hold E: climb/grab vine · hold F: charge jump · M: mute · `: debug · Y: menu (1-5) · Esc: exit</div>
+<div id="hint">Drag/click: look · W A S D: swing arms · Space: jump · hold E: climb/grab vine · hold F: charge jump · M: mute · `: debug · L: labels · Y: menu (1-6) · Esc: exit</div>
 <script type="module" src="./main.js"></script>
 </body>
 </html>
