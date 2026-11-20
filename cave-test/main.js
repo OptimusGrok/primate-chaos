@@ -162,7 +162,7 @@ function cxSlip(p) { // smooth rock: chasm, cliff face, and the last 3 m of the 
 }
 function cxStrip(p) { return p.z < CX.ledgeZ + CX.slipRun && p.z > CX.ledgeZ - 0.3 && p.y < CXF + 0.4 && Math.abs(p.x - 3) < 7; } // the smooth grey strip before the first ledge's lip
 const SLICK_K = 0.75; // grey strip floor: a hand pushing on it slides (moves you 75% of the hand's travel, along the floor only) and never holds you up or flings you
-// void columns: falling here = 2 s fall, then back to spawn
+// void columns: falling here = 2 s fall, then back on the last platform you stood on (else spawn)
 const cxVoid = p => inXZ(p, CX.chasm) || (p.x > CX.faceX + 0.05 && p.z > CX.faceZ && p.z < -50);
 const wallClimb = p => p.y < CLIMB_H && !cxSlip(p);
 addCol('wall', p => { let d = p.z + HALF; for (const k of CAVES) d = Math.max(d, -sdBox(p, k.c, k.h)); return Math.max(d, -cxInterior(p)); }, null, 0, wallClimb, { wall: 'N' });
@@ -743,13 +743,32 @@ const isClimb = (col, p) => typeof col.climb === 'function' ? col.climb(p) : col
 function spawn(inp) {
   const a = Math.random() * Math.PI * 2, r = 0.4 + Math.random() * 0.8, sx = Math.cos(a) * r, sz = Math.sin(a) * r; // centre of the clearing (small jitter so players don't overlap)
   rig.position.set(sx - inp.head.x, terrainH(sx, sz) + BODY_OFF + BODY_R + 0.02 - inp.head.y, sz - inp.head.z);
-  PH.V.set(0, 0, 0); PH.hist.length = 0; PH.hands.forEach(h => { h.anch = false; if (h.vine) h.vine.held--; h.vine = null; }); PH.anyAnch = false; PH.spawned = true; MM.stats.spawns = (MM.stats.spawns || 0) + 1; PH.lastSup = PH.simT; JUMP.charging = false; JUMP.sink = 0; JUMP.push = 0; JUMP.blend = 0; JUMP.fly = 0;
+  PH.V.set(0, 0, 0); PH.hist.length = 0; PH.hands.forEach(h => { h.anch = false; h.ghost = false; if (h.vine) h.vine.held--; h.vine = null; }); PH.anyAnch = false; PH.lastPlat = null; PH.spawned = true; MM.stats.spawns = (MM.stats.spawns || 0) + 1; PH.lastSup = PH.simT; JUMP.charging = false; JUMP.sink = 0; JUMP.push = 0; JUMP.blend = 0; JUMP.fly = 0;
 }
-// fell into the pillar chasm (the gap after the first ledge, between the pillars, before the far ledge): back on the first ledge, 1 m from its lip, facing the pillars (-z, the way you come in)
-CX.ledgeSpawn = new V3(3, CXF, CX.ledgeZ + 1.0);
-function spawnLedge(inp) {
-  spawn(inp); const p = CX.ledgeSpawn; rig.position.set(p.x - inp.head.x, p.y + BODY_OFF + BODY_R + 0.02 - inp.head.y, p.z - inp.head.z); MM.stats.ledgeSpawns = (MM.stats.ledgeSpawns || 0) + 1;
+// falling in the cave system: back on the last platform you stood on (safe spot away from its drop), else spawn
+CX.ledgeSpawn = new V3(3, CXF, CX.ledgeZ + 1.0); // first ledge: 1 m back from its lip, facing the pillars
+CX.plats = [
+  { id: 'first ledge', at: () => CX.ledgeSpawn },
+  ...CX.pillars.map((pc, i) => ({ id: 'pillar ' + (i + 1), at: () => new V3(pc.x, CXF, pc.z) })),     // pillar centre
+  { id: 'far ledge', at: () => new V3(3, CXF, CX.endEdge - 1.2) },                                   // ledge chamber after pillar 3, 1.2 m back from its drop
+  { id: 'cliff lip', at: () => new V3(CX.lip.c.x - 0.7, CXF, CX.lip.c.z) },                          // end of the side tunnel, 1.2 m back from the lip's drop
+  ...CX.ledges.map((l, i) => ({ id: l.long ? 'long ledge' : 'cliff ledge ' + (i + 1), long: l.long, l, at: x => new V3(l.long ? clamp(x ?? l.c.x, l.c.x - l.h.x + 0.6, l.c.x + l.h.x - 0.6) : l.c.x, l.c.y + l.h.y, l.c.z) })), // 1x1 ledges: centre; long ledge: where you were, kept 0.6 m from its ends
+];
+function cxPlatAt(p) { // which platform you are standing on (feet at p), or null
+  if (p.z > -HALF - 1) return null;                                                                    // jungle: normal spawn
+  for (let i = 0; i < CX.pillars.length; i++) { const pc = CX.pillars[i]; if (Math.hypot(p.x - pc.x, p.z - pc.z) < CX.PR + 0.4 && p.y > CXF - 0.5) return CX.plats[1 + i]; }
+  for (let i = 0; i < CX.ledges.length; i++) if (inXZ(p, CX.ledges[i], 0.35) && p.y > CX.ledges[i].c.y) return CX.plats[6 + i];
+  if (p.y < CXF - 0.5) return undefined;                                                               // below the floors: keep the last one
+  if (p.x > CX.rt.vx0 - 0.5 && Math.abs(p.z - CX.rt.z) < CX.rt.hw + 1) return CX.plats[5];             // side tunnel / mouth lip
+  if (p.z < CX.endEdge + 0.3) return CX.plats[4];                                                      // ledge chamber
+  if (p.z > CX.ledgeZ - 0.3) return CX.plats[0];                                                       // tunnel, big cave, first ledge
+  return undefined;
 }
+function spawnPlat(inp, pl) {
+  const p = pl.at(PH.lastPlatX); spawn(inp); rig.position.set(p.x - inp.head.x, p.y + BODY_OFF + BODY_R + 0.02 - inp.head.y, p.z - inp.head.z); PH.lastPlat = pl;
+  MM.stats.ledgeSpawns = (MM.stats.ledgeSpawns || 0) + 1; MM.lastRespawn = pl.id;
+}
+const _pf = new V3();
 function physStep(dt, inp, now) {
   const P = rig.position;
   const wasAnch = PH.anyAnch;
@@ -767,8 +786,9 @@ function physStep(dt, inp, now) {
       }
     }
     if (h.vine) { h.contact = false; continue; }
-    if (inp.noHands) { h.anch = false; h.slick = false; h.gripAnch = false; h.contact = false; h.slip = false; continue; } // charged jump (planted / in flight): hands don't touch rock
+    if (inp.noHands) { h.anch = false; h.slick = false; h.gripAnch = false; h.contact = false; h.slip = false; h.ghost = true; continue; } // charged jump (planted / in flight): hands don't touch rock
     const q = nearest(hw);
+    if (h.ghost) { if (q.d < HR - 0.03) { h.contact = false; h.slip = false; continue; } h.ghost = false; } // hands back on after a jump / the menu while already sunk into rock: they pass through until they come out (no snap, no launch)
     h.contact = q.d < HR + 0.01; h.col = q.col;
     if (h.anch && h.slick) { // pushing along the slick grey strip: horizontal only, the hand slides a bit
       if (q.d > HR + 0.015 || !cxStrip(hw)) { h.anch = false; h.slick = false; }
@@ -816,9 +836,11 @@ function physStep(dt, inp, now) {
   const hy = P.y + inp.head.y;
   _oob.set(P.x + inp.head.x, hy, P.z + inp.head.z);
   if (PH.grounded || PH.anyAnch || PH.hands.some(h => h.vine)) PH.lastSup = now;
+  if (PH.grounded) { _pf.set(P.x + inp.head.x, P.y + inp.head.y - BODY_OFF - BODY_R, P.z + inp.head.z); const pl = cxPlatAt(_pf); if (pl !== undefined) { PH.lastPlat = pl; PH.lastPlatX = _pf.x; } }
+  if (PH.hands.some(h => h.vine && h.vine.trig)) PH.lastPlat = CX.plats[7]; // the cliff vine hangs above the second ledge: falling off it puts you back there
   const inCx = _oob.z < -HALF - 1 && cxInterior(_oob) < 0.6;
   if (inCx) { // cave system: voids are real; falling into one = 2 s of falling, then spawn
-    if (cxVoid(_oob) && hy < CXF - 0.4 && now - (PH.lastSup ?? now) >= CX.fallT) { MM.stats.fallResets = (MM.stats.fallResets || 0) + 1; MM.lastFall = now - PH.lastSup; if (inXZ(_oob, CX.chasm)) spawnLedge(inp); else spawn(inp); }
+    if (cxVoid(_oob) && hy < CXF - 0.4 && now - (PH.lastSup ?? now) >= CX.fallT) { MM.stats.fallResets = (MM.stats.fallResets || 0) + 1; MM.lastFall = now - PH.lastSup; if (PH.lastPlat) spawnPlat(inp, PH.lastPlat); else spawn(inp); }
     else if (hy < CX.ocean - 300) spawn(inp);
   } else if (hy < -6 || hy > 40 || outOfBounds(_oob)) spawn(inp);
 }
@@ -1139,13 +1161,13 @@ function jumpLaunch(inp) { // push off (on release, or automatically when the ch
   if (J.onVine) { for (const h of PH.hands) { if (h.vine) { h.vine.held--; h.vine = null; } } J.noGrab = 0.4; }
   else { J.push = J.PUSH; P.y += 0.03; }
   for (const h of PH.hands) { h.anch = false; h.gripAnch = false; }
-  PH.anyAnch = false; PH.hist.length = 0; J.fly = J.FLY; J.count++; J.last = { c: J.c, h: sp.h, u: sp.u, t: J.t, auto: J.c >= 1, dir: [_jf.x, _jf.z] }; sfx('whoosh'); haptic(inp.hands[1], 0.3 + 0.6 * J.c, 60);
+  PH.anyAnch = false; PH.hist.length = 0; J.fly = J.FLY; J.wait = true; J.count++; J.last = { c: J.c, h: sp.h, u: sp.u, t: J.t, auto: J.c >= 1, dir: [_jf.x, _jf.z] }; sfx('whoosh'); haptic(inp.hands[1], 0.3 + 0.6 * J.c, 60);
 }
 function jumpTick(dt, inp) {
   const J = JUMP, P = rig.position, vineHeld = PH.hands.some(h => h.vine);
   const support = PH.grounded || PH.anyAnch || vineHeld || PH.simT - (PH.lastSup ?? -9) < J.GRACE; // brief flickers (head bob) keep the charge
   _je.setFromQuaternion(inp.headQ, 'YXZ'); _jf.set(-Math.sin(_je.y), 0, -Math.cos(_je.y)); _jr.set(-_jf.z, 0, _jf.x);
-  if (!(inp.aRaw ?? inp.a)) J.wait = false; // after an automatic full-charge launch, A must be released before a new charge
+  if (!(inp.aRaw ?? inp.a) && (PH.grounded || PH.anyAnch || vineHeld)) J.wait = false; // after any charged jump, A must be released on the ground (not in mid-air) before a new charge
   if (inp.a && !J.wait) {
     if (!J.charging && support && !J.push && !(J.fly > 0 && !PH.grounded && !vineHeld)) {
       J.charging = true; J.t = 0; J.c = 0; J.onVine = vineHeld;
@@ -1683,7 +1705,7 @@ function archPortal(b, cu, cv0, w, h, a, place) { // flat plate with an arch-sha
     for (let i = 0; i < p.length; i += 3) { const y = p[i + 1]; if (y < 29.9) { const a = Math.atan2(p[i + 2], p[i]), e = 1 + 0.12 * cxNoise(a * 2.5 + 3, y * 0.4, 21); p[i] *= e; p[i + 2] *= e; } }
     b.add(g, '#5c544c', M4(new V3(pc.x, CXF - 30, pc.z)), 0.12);
     b.add(new THREE.CircleGeometry(CX.PR, 9).rotateX(-Math.PI / 2), '#b3a894', M4(new V3(pc.x, CXF + 0.004, pc.z)), 0.1);
-    addCol('rock', p => { const dxz = Math.hypot(p.x - pc.x, p.z - pc.z) - CX.PR, dy = Math.max(p.y - CXF, CXF - 60 - p.y); return Math.min(Math.max(dxz, dy), 0) + Math.hypot(Math.max(dxz, 0), Math.max(dy, 0)); }, new V3(pc.x, CXF - 30, pc.z), 31, false, { cave: 'pillar' }); // smooth: you can't climb a pillar, you have to land on it
+    addCol('rock', p => { const dxz = Math.hypot(p.x - pc.x, p.z - pc.z) - CX.PR * (1 + 0.4 * clamp((CXF - p.y) / 60, 0, 1)), dy = Math.max(p.y - CXF, CXF - 60 - p.y); return Math.min(Math.max(dxz, dy), 0) + Math.hypot(Math.max(dxz, 0), Math.max(dy, 0)); }, new V3(pc.x, CXF - 30, pc.z), 31, true, { cave: 'pillar' }); // rock like any other: walk on the top, grab the sides and climb back up (radius follows the mesh's taper; no lip at the top edge)
   }
   const m = new THREE.Mesh(b.build(), cxMatIn); CXG.in.add(m); CX.inTris = m.geometry.attributes.position.count / 3;
   // glowing crystals so the big cave reads

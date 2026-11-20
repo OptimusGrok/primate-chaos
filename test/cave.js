@@ -138,7 +138,7 @@ const HELPERS = () => {
     const overVoid = h => h.z < CX.ledgeZ - 0.4 && h.z > CX.endEdge + 0.4 && !CX.pillars.some(pc => Math.hypot(h.x - pc.x, h.z - pc.z) < CX.PR + 0.4);
     const run = (secs, drive) => { const s0 = C.spawns(), f0 = MM.stats.fallResets || 0; let held = 0, worstHeld = 0; for (let i = 0; i < secs * 72; i++) { drive(i / 72); MM.step(1 / 72); const h = C.head(); if (C.spawns() > s0) return { spawned: true, t: +(i / 72).toFixed(2), fallTimer: (MM.stats.fallResets || 0) > f0, fallFor: +MM.lastFall.toFixed(2), worstHeld: +worstHeld.toFixed(2) }; if (overVoid(h) && h.y > F + 0.5) { held += 1 / 72; worstHeld = Math.max(worstHeld, held); } else held = 0; } const h = C.head(); return { spawned: false, at: [+h.x.toFixed(2), +h.y.toFixed(2), +h.z.toFixed(2)], worstHeld }; };
     // walk the head forward 3 m at 0.8 m/s: hands hanging, hands dragging on the floor, arms swinging; centre, both sides, diagonal
-    for (const [x, yaw, handY, swing, z0] of [[3, 0, 0.98, 0, CX.ledgeZ + 1], [3, 0, 0.75, 0, CX.ledgeZ + 1], [-1.5, 0.3, 0.75, 1, CX.ledgeZ + 1], [7.5, -0.3, 0.98, 1, CX.ledgeZ + 1], [3, 0, 0.75, 1, CX.pillars[0].z], [3, -Math.PI / 2, 0.75, 0, CX.pillars[1].z], [3, 0, 0.75, 0, CX.pillars[2].z]]) {
+    for (const [x, yaw, handY, swing, z0] of [[3, 0, 0.98, 0, CX.ledgeZ + 1], [3, 0, 0.75, 0, CX.ledgeZ + 1], [-1.5, 0.3, 0.75, 1, CX.ledgeZ + 1], [7.5, -0.3, 0.98, 1, CX.ledgeZ + 1], [3, 0, 0.98, 0, CX.pillars[0].z], [3, -Math.PI / 2, 0.98, 0, CX.pillars[1].z], [3, 0, 1.1, 1, CX.pillars[2].z]]) {
       C.stand(x, z0, yaw); const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
       const res = run(6, t => { const d = Math.min(3, t * 0.8), ph = swing ? Math.sin(t * 6) * 0.3 : 0; MM.fake.head = [fx * d, 1.6, fz * d];
         for (const [i, s] of [[0, -1], [1, 1]]) { const k = s * ph; MM.fake.hands[i].p = [rx * 0.27 * s + fx * (d - 0.2 + k), handY - (swing ? Math.max(0, s * Math.sin(t * 6)) * 0.25 : 0), rz * 0.27 * s + fz * (d - 0.2 + k)]; } });
@@ -158,7 +158,7 @@ const HELPERS = () => {
     for (let x = 11.5; x <= 40; x += 0.7) for (let z = CX.faceZ + 0.6; z <= -50.5; z += 0.7) for (let y = F - 6; y <= F + 8; y += 0.7) { if ([...CX.ledges, CX.lip, CX.overhang].some(b => Math.abs(x - b.c.x) < b.h.x + 0.5 && Math.abs(y - b.c.y) < b.h.y + 0.5 && Math.abs(z - b.c.z) < b.h.z + 0.5)) continue; v.set(x, y, z); n++; if (MM.nearest(v).d < 0.4) hits++; }
     r.scan = { n, hits }; C.idle(0); return r;
   });
-  ok(walk.walks.every(w => w.spawned && w.fallTimer && w.fallFor >= 1.99 && w.fallFor < 2.7 && w.worstHeld < 0.35), 'walking off the ledge / off each pillar (head moving room-scale; hands hanging, dragging on the floor or swinging; centre, sides, diagonal, sideways): nothing holds you up, you fall and respawn 2 s after your last footing (a hand sliding off the edge can add a moment) ' + JSON.stringify(walk.walks.map(w => [w.x, w.z0, w.handY, w.swing, w.spawned ? w.t : w.at, w.worstHeld, w.fallFor, w.fallTimer])));
+  ok(walk.walks.every(w => w.spawned && w.fallTimer && w.fallFor >= 1.99 && w.fallFor < 2.7 && w.worstHeld < 0.35), 'walking off the ledge (head moving room-scale; hands hanging, dragging on the slick strip or swinging; centre, sides, diagonal) or off each pillar (hands off the rock; pillar tops now grip like any rock): nothing holds you up, you fall and respawn 2 s after your last footing (a hand sliding off the edge can add a moment) ' + JSON.stringify(walk.walks.map(w => [w.x, w.z0, w.handY, w.swing, w.spawned ? w.t : w.at, w.worstHeld, w.fallFor, w.fallTimer])));
   ok(walk.pushes.every(w => w.spawned ? w.fallTimer && w.worstHeld < 0.6 : w.at[2] > MM_LEDGE_Z - 0.3), 'gorilla arm-push runs at the edge: you either stop on the cave floor or fall and respawn; never stand on the chasm ' + JSON.stringify(walk.pushes.map(w => [w.yaw, w.spawned ? 'fell@' + w.t : w.at])));
   ok(walk.scan.hits === 0, `no invisible collider anywhere in the chasm (between and past the pillars) or in the cliff air: ${walk.scan.n} probe points, ${walk.scan.hits} hits`);
   // ---------- 2e. gorilla arm locomotion on the REAL WebXR input path (readVR via scripted XRFrame/inputSources): controllers pushing on ground / walls move you ----------
@@ -193,7 +193,9 @@ const HELPERS = () => {
     set(Ls, 5, true); C.run(0.1); set(Ls, 5, false); C.run(0.1); r.menuClosed = !MM.MENU.open; r.afterMenu = groundPush();
     // after a respawn (walked off the ledge into the chasm, 2 s fall, back at spawn)
     const s0 = C.spawns(); S.head = [0, 1.6, 0]; rest(); MM.place(3, F - 2, CX.ledgeZ - 1.2); let t = 0; while (C.spawns() === s0 && t < 5) { MM.step(1 / 72); t += 1 / 72; } r.respawned = C.spawns() > s0; settle(); r.respawnZ = +C.head().z.toFixed(2); r.afterRespawn = groundPush(-1); // the chasm puts you back on the first ledge, facing the drop: push back into the cave
-    S.head = [0, 1.6, 0]; rest(); const s1 = C.spawns(); MM.place(14, F - 2, -60); t = 0; while (C.spawns() === s1 && t < 5) { MM.step(1 / 72); t += 1 / 72; } r.respawnedSpawn = C.spawns() > s1; settle(); r.afterSpawnRespawn = groundPush(); // off the cliff outside -> spawn
+    // cliff air with no last platform (standing in the jungle first clears it) still goes to spawn
+    S.head = [0, 1.6, 0]; rest(); MM.place(0, gy(0, 4) + 1.3, 4); settle();
+    const s1 = C.spawns(); MM.place(14, F - 2, -60); t = 0; while (C.spawns() === s1 && t < 5) { MM.step(1 / 72); t += 1 / 72; } r.respawnedSpawn = C.spawns() > s1; settle(); r.afterSpawnRespawn = groundPush();
     MM.xrSim = null; C.idle(0);
     return r;
   });
@@ -239,26 +241,98 @@ const HELPERS = () => {
   ok(!strip.across.spawned && strip.across.minZ < MM_LEDGE_Z + 0.1 && strip.side > 0.5, `crossing the colour change (no invisible wall at the strip start, ${strip.across.from} -> ${strip.across.minZ}) and sideways along the strip (${strip.side} m) work`);
   ok(strip.fromStill.holds === 0 && strip.fromStill.maxV < 1.0 && strip.hang.spawned && strip.hang.hold === 0 && strip.fling.spawned && strip.fling.minZ > MM_LEDGE_Z - 2, `still slippery: the strip never holds you (hand on it while hanging off the lip: you slide off and fall) and wild arm flings at the lip don't launch you over the gap (${JSON.stringify(strip.fling)})`);
   ok(strip.walkOff.spawned && strip.walkOff.fellAt < MM_LEDGE_Z + 0.2 && strip.walkOff.ledge, `walking on past the lip = you fall (dropped at z ${strip.walkOff.fellAt}) and 2 s later you are back on the first ledge`);
-  // ---------- 3. falling = 2 s, then back: pillar chasm -> first ledge (near its lip), everything else -> spawn ----------
-  const fall = await p.evaluate(() => {
-    const r = [], CX = MM.CX, L = CX.ledgeSpawn;
-    for (const [x, z, yaw, name] of [[3, CX.ledgeZ + 0.3, 0, 'chasm'], [10.9, -72, -Math.PI / 2, 'cliff (lip)'], [21.5, -72.4, -Math.PI / 2, 'long ledge']]) {
-      C.stand(x, z, yaw, name === 'long ledge' ? CX.F + 3 : CX.F); const s0 = C.spawns(), f0 = MM.stats.fallResets || 0;
-      MM.place(...(name === 'chasm' ? [3, CX.F + 1, CX.ledgeZ - 1.5] : name === 'cliff (lip)' ? [11.9, CX.F + 1, -71.5] : [21.5, CX.F + 4, -71.6])); // step off the edge
-      let t = 0, minY = 99; while (C.spawns() === s0 && t < 4) { MM.step(1 / 72); t += 1 / 72; if (C.spawns() === s0) minY = Math.min(minY, C.head().y); }
-      const h = C.head(); r.push({ name, t: +t.toFixed(2), fell: +(CX.F + 1 - minY).toFixed(1), atSpawn: Math.hypot(h.x, h.z) < 2 && h.y < 2, atLedge: Math.hypot(h.x - L.x, h.z - L.z) < 0.5 && Math.abs(h.y - CX.F - 0.9) < 0.6, timer: (MM.stats.fallResets || 0) > f0 });
+  // ---------- 2g. pillars are rock: walk on the tops with arm pushes, grab the sides and climb back up (real WebXR input path) ----------
+  // ---------- 2h. landing a big jump (pillar or ledge) never jumps you again by itself ----------
+  const pil = await p.evaluate(() => {
+    const r = {}, CX = MM.CX, F = CX.F, J = MM.JUMP, PC = CX.pillars;
+    const btn = () => ({ pressed: false, touched: false, value: 0 });
+    const mk = hand => ({ handedness: hand, gripSpace: { hand }, targetRaySpace: {}, profiles: ['oculus-touch-v3'], gamepad: { mapping: 'xr-standard', buttons: [0, 1, 2, 3, 4, 5, 6].map(btn), axes: [0, 0, 0, 0], hapticActuators: [] } });
+    const Ls = mk('left'), Rs = mk('right'), S = { head: [0, 1.6, 0], hands: [[-0.27, 0.98, -0.2], [0.27, 0.98, -0.2]] };
+    const pose = p => ({ transform: { position: { x: p[0], y: p[1], z: p[2] }, orientation: { x: 0, y: 0, z: 0, w: 1 } } });
+    MM.fake = null; MM.xrSim = { ref: {}, session: { inputSources: [Ls, Rs] }, frame: { getViewerPose: () => pose(S.head), getPose: s => pose(S.hands[s.hand === 'left' ? 0 : 1]) } };
+    const A = on => { Rs.gamepad.buttons[4].pressed = on; Rs.gamepad.buttons[4].value = on ? 1 : 0; };
+    const rest = () => { S.hands = [[-0.27, 0.98, -0.2], [0.27, 0.98, -0.2]]; };
+    const stand = (x, z, y = F) => { S.head = [0, 1.6, 0]; rest(); A(false); MM.place(x, y + 1.3, z); C.run(1.0); };
+    const onPillar = (i, h = C.head()) => MM.PH.grounded && Math.abs(h.y - F - 0.9) < 0.3 && Math.hypot(h.x - PC[i].x, h.z - PC[i].z) < CX.PR;
+    // walk across a pillar top: short calm strokes, from the back edge toward the front edge, and sideways
+    r.top = PC.map((pc, i) => { stand(pc.x, pc.z + 0.6); const z0 = C.head().z; let holds = 0;
+      C.run(0.5, t => { const cyc = (t % 0.5) / 0.5, down = cyc < 0.45, off = down ? -0.2 + 0.4 * (cyc / 0.45) : 0.2 - 0.4 * ((cyc - 0.45) / 0.55), y = down ? 0.62 : 0.95; S.hands = [[-0.3, y, off], [0.3, y, off]]; if (MM.PH.anyAnch) holds++; });
+      rest(); C.run(0.5); const h = C.head(); return { i, moved: +(z0 - h.z).toFixed(2), holds, on: onPillar(i), edge: +(CX.PR - Math.hypot(h.x - pc.x, h.z - pc.z)).toFixed(2) }; });
+    stand(PC[1].x + 0.6, PC[1].z); { const x0 = C.head().x; C.run(0.5, t => { const cyc = (t % 0.5) / 0.5, down = cyc < 0.45, off = down ? -0.2 + 0.4 * (cyc / 0.45) : 0.2 - 0.4 * ((cyc - 0.45) / 0.55), y = down ? 0.62 : 0.95; S.hands = [[-0.3 + off, y, -0.2], [0.3 + off, y, -0.2]]; }); rest(); C.run(0.5); r.side = { moved: +(C.head().x - x0).toFixed(2) * -1, on: onPillar(1) }; }
+    // climb: hanging below the top beside each pillar (fell off it), hand-over-hand up its side, then pull onto the top
+    const climb = (i, side) => { const pc = PC[i], sz = side; S.head = [0, 1.6, 0]; rest(); A(false); MM.place(pc.x, F - 1.0, pc.z + sz * (CX.PR + 0.42)); const s0 = C.spawns(); let t = 0, held = 0, top = false, minY = 99;
+      while (t < 8 && C.spawns() === s0) { const tt = t; for (let k = 0; k < 2; k++) { const cyc = ((tt + k * 0.3) % 0.6) / 0.6, down = cyc < 0.5, s = k ? 0.25 : -0.25, zf = -sz; // reach toward the pillar, pull down and in
+          S.hands[k] = down ? [s, 1.9 - 1.1 * (cyc / 0.5), zf * (0.48 - 0.25 * (cyc / 0.5))] : [s, 0.8 + 1.1 * ((cyc - 0.5) / 0.5), zf * 0.15]; }
+        MM.step(1 / 72); t += 1 / 72; if (MM.PH.anyAnch) held++; minY = Math.min(minY, C.head().y); if (onPillar(i)) { top = true; break; } }
+      rest(); C.run(1.0); return { i, side, t: +t.toFixed(2), held, top, stays: onPillar(i), spawned: C.spawns() > s0, startY: +(F - 1.0).toFixed(2), minY: +minY.toFixed(2) }; };
+    r.climb = [climb(0, 1), climb(1, 1), climb(2, -1), climb(1, -1)];
+    // a slip off a pillar: walked off its edge with hands hanging: you can catch its side and climb back up
+    stand(PC[0].x, PC[0].z - 0.4); { const s0 = C.spawns(); for (let i = 0; i < 72 * 1.2; i++) { S.head = [0, 1.6, -i / 72 * 0.8]; S.hands = [[-0.27, 0.98, S.head[2] - 0.2], [0.27, 0.98, S.head[2] - 0.2]]; MM.step(1 / 72); }
+      const hy = C.head().y; r.slipOff = { below: +(F + 0.9 - hy).toFixed(2), spawned: C.spawns() > s0 }; }
+    // ---- 2h: big jumps onto pillar 1 (from the first ledge's lip) and the far side, every way of holding A and moving the hands on landing ----
+    const variants = {
+      autoHoldA: { hold: 9 },                              // 3 s auto-launch, A still held through the landing and after
+      autoReleaseAir: { hold: 3.4 },                       // auto-launch, A released in flight
+      autoReleaseAfterLand: { hold: 4.6 },                 // auto-launch, A released after landing
+      manual: { hold: 2.95 },                              // released just before full
+      manualRehold: { hold: 2.95, reA: 3.15 },             // released to jump, A pressed again in flight and held through landing
+      handsLow: { hold: 9, hands: t => t > 3.2 ? [[-0.3, 0.55, -0.1], [0.3, 0.55, -0.1]] : null },        // hands down at/through the ground when you land
+      handsSlam: { hold: 3.5, hands: t => t > 3.2 ? [[-0.3, 0.98 - Math.min(1, (t - 3.2) * 2) * 0.5, -0.25], [0.3, 0.98 - Math.min(1, (t - 3.2) * 2) * 0.5, -0.25]] : null }, // hands slammed down on landing
+      handsSwing: { hold: 9, hands: t => t > 3.2 ? [[-0.3, 1.0, -0.2 + 0.25 * Math.sin(t * 8)], [0.3, 1.0, -0.2 - 0.25 * Math.sin(t * 8)]] : null }, // hands waving about (not pushing)
+      bob: { hold: 9, head: t => [0, 1.6 + 0.02 * Math.sin(t * 9), 0] },
+    };
+    r.land = {};
+    for (const [name, v] of Object.entries(variants)) {
+      stand(3, CX.ledgeZ + 0.3); const n0 = J.count, s0 = C.spawns(); A(true); let t = 0, landT = null, yL = 0, rise = 0, vUp = 0;
+      while (t < 7.5) { if (v.reA != null && t >= v.reA) A(true); else if (t >= v.hold) A(false); const hh = v.hands && v.hands(t); if (hh) S.hands = hh; if (v.head) S.head = v.head(t);
+        MM.step(1 / 72); t += 1 / 72; const h = C.head();
+        if (J.count > n0 && landT === null && MM.PH.grounded && t > 3.2) { landT = t; yL = h.y; }
+        if (landT !== null) { rise = Math.max(rise, h.y - yL); vUp = Math.max(vUp, MM.PH.V.y); } }
+      A(false); rest(); C.run(0.5); r.land[name] = { jumps: J.count - n0, landT: landT && +landT.toFixed(2), rise: +rise.toFixed(2), vUp: +vUp.toFixed(2), on1: onPillar(0), spawned: C.spawns() > s0, charging: J.charging };
     }
-    // every part of the pillar chasm: just past the lip, between the pillars, before the far ledge, its sides -> first ledge
-    r.chasm = [];
-    for (const [x, z] of [[3, -48.6], [3, -50.5], [1.5, -56], [3, -57.5], [4.5, -62], [3, -63.5], [3, -68], [3, -69.3], [-3, -52], [9.2, -60]]) {
-      C.idle(0); MM.place(x, CX.F + 1, z); const s0 = C.spawns(), l0 = MM.stats.ledgeSpawns || 0; let t = 0; while (C.spawns() === s0 && t < 4) { MM.step(1 / 72); t += 1 / 72; }
-      const h = C.head(); r.chasm.push({ x, z, t: +t.toFixed(2), atLedge: Math.hypot(h.x - L.x, h.z - L.z) < 0.5 && Math.abs(h.y - CX.F - 0.9) < 0.6 && (MM.stats.ledgeSpawns || 0) === l0 + 1, lip: +(CX.ledgeZ - h.z).toFixed(2) });
-      C.run(1.0); const h2 = C.head(); r.chasm[r.chasm.length - 1].stays = Math.abs(h2.z - h.z) < 0.05 && C.spawns() === s0 + 1;
+    // and the same from pillar 1 to pillar 2, and onto the first ledge from the tunnel side (landing on flat ground)
+    for (const [name, x, z] of [['p1->p2', PC[0].x, PC[0].z - CX.PR + 0.25], ['flat', 3, -38]]) {
+      stand(x, z); const n0 = J.count; A(true); let t = 0, landT = null, yL = 0, rise = 0;
+      while (t < 7) { S.hands = t > 3.2 ? [[-0.3, 0.55, -0.1], [0.3, 0.55, -0.1]] : S.hands; MM.step(1 / 72); t += 1 / 72; const h = C.head(); if (J.count > n0 && landT === null && MM.PH.grounded && t > 3.2) { landT = t; yL = h.y; } if (landT !== null) rise = Math.max(rise, h.y - yL); }
+      A(false); rest(); C.run(0.5); r.land[name] = { jumps: J.count - n0, rise: +rise.toFixed(2), on2: name === 'p1->p2' ? onPillar(1) : null, grounded: MM.PH.grounded };
     }
-    return { list: r, chasm: r.chasm };
+    MM.xrSim = null; C.idle(0);
+    return r;
   });
-  ok(fall.list.every(f => Math.abs(f.t - 2.0) < 0.05 && f.fell > 15 && f.timer) && fall.list[0].atLedge && !fall.list[0].atSpawn && fall.list[1].atSpawn && fall.list[2].atSpawn, 'falling = 2 s, then: into the pillar chasm -> back on the first ledge; off the cliff lip / the long ledge outside -> spawn as before: ' + JSON.stringify(fall.list));
-  ok(fall.chasm.every(c => Math.abs(c.t - 2.0) < 0.05 && c.atLedge && c.stays && Math.abs(c.lip + 1) < 0.5), 'anywhere in the pillar chasm (past the lip, between every pillar, before the far ledge, its sides) respawns you on the first ledge 1 m from its lip (facing the pillars), standing still: ' + JSON.stringify(fall.chasm.map(c => [c.x, c.z, c.t, c.lip])));
+  ok(pil.top.every(t => t.moved > 0.3 && t.holds > 10 && t.on) && pil.side.moved > 0.3 && pil.side.on, 'pillar tops are walkable rock: controller pushes move you across every pillar top (and sideways) and you stay on it ' + JSON.stringify([pil.top, pil.side]));
+  ok(pil.climb.every(c => c.top && c.stays && !c.spawned && c.held > 20), 'pillar sides are climbable: hanging 1 m below the top beside a pillar, hand-over-hand climbing gets you back up onto its top (both sides, all pillars, no lip in the way) ' + JSON.stringify(pil.climb.map(c => [c.i + 1, c.side, c.t, c.held])));
+  ok(Object.values(pil.land).every(l => l.jumps === 1 && l.rise < 0.12 && (l.vUp === undefined || l.vUp < 0.5)) && ['autoHoldA', 'autoReleaseAir', 'autoReleaseAfterLand', 'manual', 'manualRehold', 'handsLow', 'handsSlam', 'handsSwing', 'bob'].every(k => pil.land[k].on1 && !pil.land[k].spawned && !pil.land[k].charging) && pil.land['p1->p2'].on2 && pil.land.flat.grounded, 'a big jump onto a pillar (3 s auto-jump with A still held, released in the air / after landing, manual release, A pressed again in flight and held, hands low / slammed down / waving on landing, head bob) or onto flat ground lands and stays: exactly one jump, no bounce or second launch ' + JSON.stringify(pil.land));
+  // ---------- 3. falling = 2 s, then back on the last place you stood (safe spot away from its drop); jungle / Restart -> spawn ----------
+  const fall = await p.evaluate(() => {
+    const r = [], CX = MM.CX, F = CX.F, PC = CX.pillars, HALF_OUT = MM.HALF + 6;
+    // [name, stand x, z, floor y, step-off point (x, z), expected respawn point (x, y-floor, z)]
+    const cases = [
+      ['first ledge', 3, CX.ledgeZ + 1.5, F, [3, CX.ledgeZ - 1.5], [3, F, CX.ledgeZ + 1]],
+      ['first ledge (side)', -1, CX.ledgeZ + 0.5, F, [-1, CX.ledgeZ - 1.2], [3, F, CX.ledgeZ + 1]],
+      ...PC.map((pc, i) => ['pillar ' + (i + 1), pc.x + 0.4, pc.z + 0.3, F, [pc.x, pc.z - CX.PR - 1.8], [pc.x, F, pc.z]]),
+      ['pillar 2 (fell back)', PC[1].x - 0.5, PC[1].z, F, [PC[1].x, PC[1].z + CX.PR + 1.8], [PC[1].x, F, PC[1].z]],
+      ['far ledge', 3, CX.endEdge - 1.5, F, [3, CX.endEdge + 1.2], [3, F, CX.endEdge - 1.2]],
+      ['cliff lip', 10.9, -72, F, [11.9, -71.5], [CX.lip.c.x - 0.7, F, CX.lip.c.z]],
+      ['cliff ledge 1', 13.3, -72.95, F, [13.3, -71.4], [13.3, F, -72.95]],
+      ['cliff ledge 2', 15.9, -72.95, F, [15.9, -71.4], [15.9, F, -72.95]],
+      ['long ledge', 21.5, -72.6, F + 3, [21.5, -71.4], [21.5, F + 3, -72.95]],
+      ['long ledge (end)', 25.7, -72.95, F + 3, [26.6, -72.95], [25.4, F + 3, -72.95]],
+    ];
+    for (const [name, x, z, y, off, exp] of cases) {
+      C.stand(x, z, 0, y); const s0 = C.spawns(), f0 = MM.stats.fallResets || 0, l0 = MM.stats.ledgeSpawns || 0;
+      MM.place(off[0], y + 1, off[1]); // step off the edge
+      let t = 0, minY = 99; while (C.spawns() === s0 && t < 4) { MM.step(1 / 72); t += 1 / 72; if (C.spawns() === s0) minY = Math.min(minY, C.head().y); }
+      const h = C.head(); C.run(1.5); const h2 = C.head();
+      r.push({ name, t: +t.toFixed(2), fell: +(y + 1 - minY).toFixed(1), timer: (MM.stats.fallResets || 0) > f0, plat: MM.lastRespawn, platSpawn: (MM.stats.ledgeSpawns || 0) === l0 + 1,
+        off: +Math.hypot(h.x - exp[0], h.z - exp[2]).toFixed(2), dy: +(h.y - exp[1] - 0.9).toFixed(2), stays: Math.hypot(h2.x - h.x, h2.z - h.z) < 0.05 && Math.abs(h2.y - h.y) < 0.05 && C.spawns() === s0 + 1 });
+    }
+    // no platform since the last spawn (e.g. dropped straight into the chasm from the jungle) -> spawn
+    C.stand(0, 4, 0, MM.terrainH(0, 4)); const s0 = C.spawns(); MM.place(3, F + 1, -56); let t = 0; while (C.spawns() === s0 && t < 4) { MM.step(1 / 72); t += 1 / 72; } const h = C.head();
+    r.jungle = { atSpawn: Math.hypot(h.x, h.z) < 2 && h.y < 3 && C.spawns() === s0 + 1, h: h.toArray().map(v => +v.toFixed(2)), n: C.spawns() - s0 };
+    return { list: r, jungle: r.jungle };
+  });
+  ok(fall.list.every(f => Math.abs(f.t - 2.0) < 0.05 && f.fell > 10 && f.timer && f.platSpawn && f.plat === f.name.replace(/ \(.*\)$/, '') && f.off < 0.15 && Math.abs(f.dy) < 0.5 && f.stays), 'falling = 2 s, then back on the last place you stood, at a safe spot (first ledge 1 m back from the lip, pillar centre, far ledge 1.2 m back, end of the side tunnel for the cliff lip, centre of each 1x1 cliff ledge, on the long ledge where you were) and you stay there: ' + JSON.stringify(fall.list.map(f => [f.name, f.t, f.plat, f.off, f.dy, f.stays])));
+  ok(fall.jungle.atSpawn, 'no platform stood on since the last spawn -> a fall still goes to spawn (Restart -> spawn is checked in the menu tests) ' + JSON.stringify(fall.jungle));
   // ---------- 4. play area: standing anywhere in the cave system never respawns ----------
   const stay = await p.evaluate(() => {
     const CX = MM.CX, spots = [[3, -27.5, 0], [3, -31, 0], [3, -40, 0], [5, -44, 0], [3, CX.ledgeZ + 0.2, 0], [3, CX.pillars[1].z, 0], [3, -72.5, 0], [8, -72, -Math.PI / 2], [10.6, -72, -Math.PI / 2], [13.3, -72.9, -Math.PI / 2], [15.9, -72.9, -Math.PI / 2], [23, -72.9, -Math.PI / 2, CX.F + 3]];
@@ -318,7 +392,9 @@ const HELPERS = () => {
     const l = C.land(); const L = CX.ledges[2]; r.longLedge = { ...l, on: !l.spawned && Math.abs(l.x - L.c.x) < L.h.x && Math.abs(l.y - (F + 3.9)) < 0.15 };
     // let go of the vine with both hands = fall
     C.resetVine(); C.stand(16.35, -72.8, -Math.PI / 2); MM.fake.hands[1].p = C.rot([0.18, 1.55, -0.6], -Math.PI / 2); MM.fake.hands[1].trig = true; C.run(0.2); MM.fake.a = true; C.run(2.03); MM.fake.a = false; C.run(1.0); r.heldBefore = MM.PH.hands[1].vine === C.vine();
-    const sF = C.spawns(); MM.fake.hands[1].trig = false; let tf = 0; while (C.spawns() === sF && tf < 4) { MM.step(1 / 72); tf += 1 / 72; } r.letGo = +tf.toFixed(2);
+    const sF = C.spawns(); MM.fake.hands[1].trig = false; let tf = 0; while (C.spawns() === sF && tf < 4) { MM.step(1 / 72); tf += 1 / 72; } r.letGo = +tf.toFixed(2); { const h = C.head(), l = MM.CX.ledges[1]; r.letGoAt = { plat: MM.lastRespawn, off: +Math.hypot(h.x - l.c.x, h.z - l.c.z).toFixed(2) }; }
+    // from the vine you fall back to the second ledge even if you last stood on the long ledge
+    C.resetVine(); C.stand(21.5, -72.95, 0, MM.CX.F + 3); C.idle(-Math.PI / 2); { const v = C.vine(); C.handTo(1, C.vinePt(MM.CX.F + 4)); } MM.place(18.2 + 0.3, MM.CX.F + 4.6, -72.75); C.handTo(1, C.vinePt(MM.CX.F + 4.6)); MM.fake.hands[1].trig = true; C.run(0.5); r.vineHeld2 = !!MM.PH.hands[1].vine; MM.fake.hands[1].trig = false; { const s1 = C.spawns(); let t2 = 0; while (C.spawns() === s1 && t2 < 5) { MM.step(1 / 72); t2 += 1 / 72; } r.vineFall2 = MM.lastRespawn; }
     return r;
   });
   ok(!vine.gripOnly && vine.rightGrab, 'cliff vine: grip alone does not catch it, the RIGHT TRIGGER does (caught mid-jump from ledge 2)');
@@ -327,7 +403,8 @@ const HELPERS = () => {
   ok(vine.leftGrab && vine.closedBoth, 'the LEFT trigger grabs the vine too, closing the left hand');
   ok(vine.climb.rose >= 3 && vine.climb.spawns === 0 && vine.onePull > 0.1 && vine.afterPull > 0.05, `hand-over-hand climb: ${vine.climb.rose} m in ${vine.climb.steps} grips; a single one-hand pull raises you ${vine.onePull} m and you stay up`);
   ok(vine.longLedge.on, 'charged jump off the vine lands on the 6 m x 1 m ledge: ' + JSON.stringify({ x: vine.longLedge.x, y: vine.longLedge.y, from: vine.vineHead }));
-  ok(vine.heldBefore && Math.abs(vine.letGo - 2.0) < 0.1, `letting go with both hands = fall, respawn after ${vine.letGo} s`);
+  ok(vine.heldBefore && Math.abs(vine.letGo - 2.0) < 0.1 && vine.letGoAt.plat === 'cliff ledge 2' && vine.letGoAt.off < 0.15, `letting go with both hands = fall, respawn after ${vine.letGo} s back on the second cliff ledge ${JSON.stringify(vine.letGoAt)}`);
+  ok(vine.vineHeld2 && vine.vineFall2 === 'cliff ledge 2', 'falling off the vine always puts you back on the second ledge below it (even after standing on the long ledge): ' + vine.vineFall2);
   // ---------- 7. darkness: each pillar barely visible from the one before ----------
   const dark = await p.evaluate(() => {
     const CX = MM.CX, r = [];
