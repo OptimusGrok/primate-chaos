@@ -158,8 +158,10 @@ const inXZ = (p, b, e = 0) => Math.abs(p.x - b.c.x) < b.h.x + e && Math.abs(p.z 
 function cxSlip(p) { // smooth rock: chasm, cliff face, and the last 3 m of the big cave floor (so only the charged jump crosses the gaps)
   if (inXZ(p, CX.chasm, 0.12) && p.y > CX.chasm.c.y - CX.chasm.h.y) return true;
   if (p.x > CX.faceX - 0.12 && p.z > CX.faceZ - 0.12 && p.z < -49.9) return true;
-  return p.z < CX.ledgeZ + CX.slipRun && p.z > CX.ledgeZ - 0.3 && p.y < CXF + 0.4 && Math.abs(p.x - 3) < 7;
+  return cxStrip(p);
 }
+function cxStrip(p) { return p.z < CX.ledgeZ + CX.slipRun && p.z > CX.ledgeZ - 0.3 && p.y < CXF + 0.4 && Math.abs(p.x - 3) < 7; } // the smooth grey strip before the first ledge's lip
+const SLICK_K = 0.75; // grey strip floor: a hand pushing on it slides (moves you 75% of the hand's travel, along the floor only) and never holds you up or flings you
 // void columns: falling here = 2 s fall, then back to spawn
 const cxVoid = p => inXZ(p, CX.chasm) || (p.x > CX.faceX + 0.05 && p.z > CX.faceZ && p.z < -50);
 const wallClimb = p => p.y < CLIMB_H && !cxSlip(p);
@@ -743,11 +745,16 @@ function spawn(inp) {
   rig.position.set(sx - inp.head.x, terrainH(sx, sz) + BODY_OFF + BODY_R + 0.02 - inp.head.y, sz - inp.head.z);
   PH.V.set(0, 0, 0); PH.hist.length = 0; PH.hands.forEach(h => { h.anch = false; if (h.vine) h.vine.held--; h.vine = null; }); PH.anyAnch = false; PH.spawned = true; MM.stats.spawns = (MM.stats.spawns || 0) + 1; PH.lastSup = PH.simT; JUMP.charging = false; JUMP.sink = 0; JUMP.push = 0; JUMP.blend = 0; JUMP.fly = 0;
 }
+// fell into the pillar chasm (the gap after the first ledge, between the pillars, before the far ledge): back on the first ledge, 1 m from its lip, facing the pillars (-z, the way you come in)
+CX.ledgeSpawn = new V3(3, CXF, CX.ledgeZ + 1.0);
+function spawnLedge(inp) {
+  spawn(inp); const p = CX.ledgeSpawn; rig.position.set(p.x - inp.head.x, p.y + BODY_OFF + BODY_R + 0.02 - inp.head.y, p.z - inp.head.z); MM.stats.ledgeSpawns = (MM.stats.ledgeSpawns || 0) + 1;
+}
 function physStep(dt, inp, now) {
   const P = rig.position;
   const wasAnch = PH.anyAnch;
   if (!wasAnch) { PH.V.y -= GRAV * dt; P.addScaledVector(PH.V, dt); }
-  const corr = new V3(); let nc = 0; const slip = new V3();
+  const corr = new V3(); let nc = 0; const slip = new V3(), sCorr = new V3(); let ns = 0;
   for (let i = 0; i < 2; i++) {
     const h = PH.hands[i], ih = inp.hands[i];
     const hw = ih.p.clone().add(P);
@@ -760,25 +767,29 @@ function physStep(dt, inp, now) {
       }
     }
     if (h.vine) { h.contact = false; continue; }
-    if (inp.noHands) { h.anch = false; h.gripAnch = false; h.contact = false; h.slip = false; continue; } // charged jump (planted / in flight): hands don't touch rock
+    if (inp.noHands) { h.anch = false; h.slick = false; h.gripAnch = false; h.contact = false; h.slip = false; continue; } // charged jump (planted / in flight): hands don't touch rock
     const q = nearest(hw);
     h.contact = q.d < HR + 0.01; h.col = q.col;
-    if (h.anch) {
+    if (h.anch && h.slick) { // pushing along the slick grey strip: horizontal only, the hand slides a bit
+      if (q.d > HR + 0.015 || !cxStrip(hw)) { h.anch = false; h.slick = false; }
+      else { const rel = ih.p.clone().sub(inp.head), d = h.rel.clone().sub(rel); d.y = 0; d.multiplyScalar(SLICK_K); sCorr.add(d); ns++; h.rel.copy(rel); h.a.x = hw.x + d.x; h.a.z = hw.z + d.z; } // arm strokes (hand vs head) push you; walking with your feet while a hand drags doesn't hold you back
+    } else if (h.anch) {
       const release = h.gripAnch ? !ih.grip : q.d > HR + 0.015;
       if (release) { h.anch = false; h.gripAnch = false; }
       else { corr.add(h.a.clone().sub(hw)); nc++; }
     } else if (q.col && q.d < HR) {
       const n = normalOf(q.col, hw), cl = isClimb(q.col, hw);
-      if (cl) {
-        h.anch = true; h.gripAnch = ih.grip; h.a.copy(hw).addScaledVector(n, HR - q.d); corr.add(h.a.clone().sub(hw)); nc++;
+      if (!cl && n.y > 0.55 && cxStrip(hw)) { h.anch = true; h.slick = true; h.gripAnch = false; h.a.copy(hw); (h.rel || (h.rel = new V3())).copy(ih.p).sub(inp.head); haptic(ih, 0.1, 15); MM.stats.slips++; }
+      else if (cl) {
+        h.anch = true; h.slick = false; h.gripAnch = ih.grip; h.a.copy(hw).addScaledVector(n, HR - q.d); corr.add(h.a.clone().sub(hw)); nc++;
         const sp = PH.V.length(); haptic(ih, clamp(0.15 + sp * 0.12, 0.15, 0.9), 25); sfx('tap', sp);
       } else { slip.addScaledVector(n, HR - q.d); if (!h.slip) haptic(ih, 0.1, 15); MM.stats.slips++; }
       h.slip = !cl;
     } else if (q.col && ih.grip && q.d < HR + 0.06 && isClimb(q.col, hw)) {
-      h.anch = true; h.gripAnch = true; h.a.copy(hw); haptic(ih, 0.4, 30); sfx('tap', 1);
+      h.anch = true; h.slick = false; h.gripAnch = true; h.a.copy(hw); haptic(ih, 0.4, 30); sfx('tap', 1);
     } else h.slip = false;
   }
-  if (nc) P.addScaledVector(corr, 1 / nc);
+  if (nc) P.addScaledVector(corr, 1 / nc); else if (ns) P.addScaledVector(sCorr, 1 / ns);
   if (slip.lengthSq()) { P.add(slip.clampLength(0, 0.1)); const n = slip.clone().normalize(); const vn = PH.V.dot(n); if (vn < 0) PH.V.addScaledVector(n, -vn); }
   // vine: hand can't get further from the vine's top than where it grabbed → pendulum swing
   for (let i = 0; i < 2; i++) {
@@ -786,7 +797,7 @@ function physStep(dt, inp, now) {
     const hw = inp.hands[i].p.clone().add(P), d = hw.clone().sub(h.vine.top), len = d.length();
     if (len > h.vLen) { const u = d.multiplyScalar(1 / len); P.addScaledVector(u, h.vLen - len); const vr = PH.V.dot(u); if (vr > 0) PH.V.addScaledVector(u, -vr); }
   }
-  PH.anyAnch = PH.hands.some(h => h.anch);
+  PH.anyAnch = PH.hands.some(h => h.anch && !h.slick); // slick-strip hands push you along but don't hold you (gravity, no fling)
   PH.hist.push({ p: P.clone(), t: now }); while (PH.hist.length > 7) PH.hist.shift();
   if (PH.anyAnch && PH.hist.length > 2) { const o = PH.hist[0]; const span = Math.max(1e-3, now - o.t); PH.V.copy(P).sub(o.p).multiplyScalar(1 / span); }
   if (wasAnch && !PH.anyAnch) { PH.V.multiplyScalar(VEL_MULT).clampLength(0, MAX_JUMP); }
@@ -807,7 +818,7 @@ function physStep(dt, inp, now) {
   if (PH.grounded || PH.anyAnch || PH.hands.some(h => h.vine)) PH.lastSup = now;
   const inCx = _oob.z < -HALF - 1 && cxInterior(_oob) < 0.6;
   if (inCx) { // cave system: voids are real; falling into one = 2 s of falling, then spawn
-    if (cxVoid(_oob) && hy < CXF - 0.4 && now - (PH.lastSup ?? now) >= CX.fallT) { MM.stats.fallResets = (MM.stats.fallResets || 0) + 1; MM.lastFall = now - PH.lastSup; spawn(inp); }
+    if (cxVoid(_oob) && hy < CXF - 0.4 && now - (PH.lastSup ?? now) >= CX.fallT) { MM.stats.fallResets = (MM.stats.fallResets || 0) + 1; MM.lastFall = now - PH.lastSup; if (inXZ(_oob, CX.chasm)) spawnLedge(inp); else spawn(inp); }
     else if (hy < CX.ocean - 300) spawn(inp);
   } else if (hy < -6 || hy > 40 || outOfBounds(_oob)) spawn(inp);
 }
