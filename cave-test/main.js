@@ -1052,12 +1052,14 @@ function physStep(dt, inp, now) {
   if (PH.lastPlat === CX.platClear && !PH.grounded && hy < CX.CLR_Y - 0.8 && hy > CX.CLR_Y - 6) PH.clearFall = true; // only if you actually dropped off the plateau (not teleported to the jungle with lastPlat still set)
   const inCx = _oob.z < -HALF - 1 && cxInterior(_oob) < 0.6;
   const fallBack = () => { MM.stats.fallResets = (MM.stats.fallResets || 0) + 1; MM.lastFall = now - PH.lastSup; if (PH.lastPlat) spawnPlat(inp, PH.lastPlat); else spawn(inp); };
-  if (PH.clearFall && hy < CX.CLR_Y - 0.5 && now - (PH.lastSup ?? now) >= CX.fallT) fallBack();
-  else if (inCx) { // cave system: voids are real; falling into one = 2 s of falling, then spawn
-    if (cxVoid(_oob) && hy < CXF - 0.4 && now - (PH.lastSup ?? now) >= CX.fallT) fallBack();
-    else if (hy < CX.ocean - 300) spawn(inp);
-  } else if (offOcean(_oob) && hy < 8) { if (hy < -0.4 && now - (PH.lastSup ?? now) >= CX.fallT) fallBack(); }
-  else if (hy < -6 || hy > 40 || outOfBounds(_oob)) spawn(inp);
+  if (!(MM.VRTK && MM.VRTK.god)) { // vrtk god / no-fall: skip only when the test kit asked; unused path is identical
+    if (PH.clearFall && hy < CX.CLR_Y - 0.5 && now - (PH.lastSup ?? now) >= CX.fallT) fallBack();
+    else if (inCx) { // cave system: voids are real; falling into one = 2 s of falling, then spawn
+      if (cxVoid(_oob) && hy < CXF - 0.4 && now - (PH.lastSup ?? now) >= CX.fallT) fallBack();
+      else if (hy < CX.ocean - 300) spawn(inp);
+    } else if (offOcean(_oob) && hy < 8) { if (hy < -0.4 && now - (PH.lastSup ?? now) >= CX.fallT) fallBack(); }
+    else if (hy < -6 || hy > 40 || outOfBounds(_oob)) spawn(inp);
+  }
 }
 // out of the play area: beyond the clearing (+2 m slack), except inside a wall cave (they reach ~3.3 m into the north wall; the shop lives in one)
 const _oob = new V3(), CAVE_SLACK = 0.6;
@@ -1214,7 +1216,7 @@ async function joinNet(code) {
     gPose((d, id) => { if (!Array.isArray(d) || d.length < 16) return; const r = ensureRemote(id); r.samples.push({ t: performance.now(), d }); if (r.samples.length > 10) r.samples.shift(); r.lastSeen = performance.now(); r.bananas = d[14] | 0; r.avatar.setGrip(d[16] | 0); if (d[13] && d[15] === NET.round) NET.infected.add(id); });
     gInfo((d, id) => { if (!d) return; const r = ensureRemote(id); r.name = cleanName(d.name); r.color = /^#[0-9a-f]{6}$/i.test(d.color) ? d.color : '#888888'; r.avatar.tag.userData.text = r.name; r.avatar.setColor(r.color); r.avatar.setCos(cleanCos(d.cos)); if (d.lead && id === leaderId() && typeof d.t === 'number') NET.clockOff = d.t - Date.now(); hudDirty = true; });
     gRound(d => applyRound(d));
-    gTag((d, id) => { nlog('tag-rx', id.slice(0, 4), d && d.target.slice(0, 4), d && d.round); if (d && d.round === NET.round && !NET.infected.has(d.target)) { NET.infected.add(d.target); if (d.target === NET.selfId) sfx('tag'); } });
+    gTag((d, id) => { nlog('tag-rx', id.slice(0, 4), d && d.target.slice(0, 4), d && d.round); if (d && d.round === NET.round && !NET.infected.has(d.target)) { if (MM.VRTK && MM.VRTK.god && d.target === NET.selfId) return; NET.infected.add(d.target); if (d.target === NET.selfId) sfx('tag'); } });
     room.onPeerStream((stream, id) => attachVoice(stream, id));
     if (VOICE.stream) room.addStream(VOICE.stream);
   } catch (e) { console.warn('Multiplayer unavailable, solo play:', e && e.message); NET.status = 'solo (offline)'; }
@@ -1436,8 +1438,10 @@ function jumpTick(dt, inp) {
 const _hw = new V3(), _bw = new V3();
 function update(dt, frame) {
   const now = performance.now(), t = (now - clock0) / 1000, u0 = now;
+  if (MM.VRTK) dt = MM.VRTK.scaleDt(dt);
   let inp = null;
   if (MM.fake) inp = readFake(); else if (renderer.xr.isPresenting || MM.xrSim) inp = readVR(frame); else inp = readDesk(dt);
+  if (MM.VRTK && inp) inp = MM.VRTK.filterInput(inp, dt) || inp;
   if (!inp) return;
   if (!PH.spawned) spawn(inp);
   menuInput(inp); // Y menu: toggles; while open, A / triggers / grips and hand contact are ignored
@@ -1475,6 +1479,7 @@ function update(dt, frame) {
   const it = NET.infected.has(NET.selfId);
   if (it !== MM._wasIt) { MM._wasIt = it; handMat.color.set(it ? LAVA : shopLook().color); handMat.emissive.set(it ? 0xff2200 : 0); handMat.emissiveIntensity = it ? 0.6 : 0; hudDirty = wristDirty = true; }
   MM.updateMs.push(performance.now() - u0); if (MM.updateMs.length > 240) MM.updateMs.shift();
+  if (MM.VRTK) MM.VRTK.tick(dt, inp, now);
 }
 const _cp = new V3();
 function visuals() {
@@ -1856,6 +1861,7 @@ shopLookChanged(); SHOP.drawTags(); SHOP.drawPanel();
 MM.SHOP = SHOP; MM.COS = COS; MM.FURS = FURS; MM.shopPress = shopPress; MM.shopSelect = shopSelect; MM.shopLook = shopLook; MM.shopCos = shopCos;
 MM.handMat = handMat; MM.LAVA = LAVA; MM.SHOP_G = SHOP_G; MM.shopTick = shopTick;
 MM.shopSetWallet = n => { SHOP.wallet = n; shopSave(); shopDirty = true; };
+MM.shopEarn = shopEarn; MM.shopSave = shopSave;
 
 // ---------- cave system build (test build): rendered only when near, like the shop ----------
 // Own seeded noise (not rnd), so nothing above changes. Rock is flat-shaded vertex-coloured, double-sided (you see it from inside).
@@ -2496,7 +2502,7 @@ function menuDo(id) {
   else if (id === 'exit') { menuSetOpen(false); const ses = renderer.xr.getSession(); if (ses) ses.end().catch(() => showLanding()); else showLanding(); }
   else if (id === 'resume') menuSetOpen(false);
 }
-MM.MENU = MENU; MM.MUSIC = MUSIC; MM.menuDo = menuDo; MM.MENU_ITEMS = MENU_ITEMS;
+MM.MENU = MENU; MM.MUSIC = MUSIC; MM.menuDo = menuDo; MM.MENU_ITEMS = MENU_ITEMS; MM.menuSetOpen = menuSetOpen; MM.DESK = DESK;
 MM.menuBtnW = id => { const k = MENU_ITEMS.findIndex(it => it.id === id); const py = 52 + k * 70 + 29; MENU.mesh.updateMatrixWorld(true); return MENU.mesh.localToWorld(new V3(0, (0.5 - py / MENU.CH) * MENU.H, 0)).toArray(); };
 
 
